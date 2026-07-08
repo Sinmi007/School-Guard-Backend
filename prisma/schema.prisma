@@ -1,0 +1,147 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Domain models (from the SmartSchool Bus Tracker PRD)
+// ---------------------------------------------------------------------------
+
+model School {
+  id        String   @id @default(uuid())
+  name      String
+  address   String
+  lat       Float
+  lng       Float
+  createdAt DateTime @default(now())
+
+  admins    Admin[]
+  drivers   Driver[]
+  parents   Parent[]
+  buses     Bus[]
+  students  Student[]
+}
+
+model Bus {
+  id          String    @id @default(uuid())
+  schoolId    String
+  school      School    @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  plateNumber String    @map("plate_number")
+  driverName  String    @map("driver_name")
+  authToken   String    @map("auth_token")
+  status      String    @default("OFFLINE")
+  lastLat     Float?    @map("last_lat")
+  lastLng     Float?    @map("last_lng")
+  updatedAt   DateTime? @map("updated_at")
+
+  driver     Driver?
+  students   Student[]
+  telemetry  TelemetryLog[]
+  events     ManifestEvent[]
+
+  @@index([schoolId])
+  @@map("buses")
+}
+
+model Student {
+  id            String  @id @default(uuid())
+  schoolId      String
+  school        School  @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  busId         String? @map("bus_id")
+  bus           Bus?     @relation(fields: [busId], references: [id], onDelete: SetNull)
+  name          String
+  parentName    String  @map("parent_name")
+  parentPhone   String  @map("parent_phone")
+  homeLat       Float   @map("home_lat")
+  homeLng       Float   @map("home_lng")
+  paymentStatus String  @default("UNPAID") @map("payment_status")
+
+  parent        Parent?
+  manifestEvents ManifestEvent[]
+
+  @@index([schoolId])
+  @@index([busId])
+  @@map("students")
+}
+
+model TelemetryLog {
+  id         BigInt   @id @default(autoincrement())
+  busId      String   @map("bus_id")
+  bus        Bus      @relation(fields: [busId], references: [id], onDelete: Cascade)
+  lat        Float
+  lng        Float
+  speedMps   Float?   @map("speed_mps")
+  recordedAt DateTime @default(now()) @map("recorded_at")
+
+  @@index([busId])
+  @@map("telemetry_logs")
+}
+
+model ManifestEvent {
+  id              String   @id @default(uuid())
+  studentId       String   @map("student_id")
+  student         Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  busId           String   @map("bus_id")
+  bus             Bus      @relation(fields: [busId], references: [id], onDelete: Cascade)
+  eventType       String   @map("event_type")
+  timestamp       DateTime @default(now())
+  verificationLat Float    @map("verification_lat")
+  verificationLng Float    @map("verification_lng")
+
+  @@index([studentId])
+  @@index([busId])
+  @@map("manifest_events")
+}
+
+// ---------------------------------------------------------------------------
+// Authentication accounts (one per portal: admin, driver, parent)
+// ---------------------------------------------------------------------------
+
+model Admin {
+  id        String   @id @default(uuid())
+  schoolId  String
+  school    School   @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  email     String   @unique
+  password  String
+  name      String
+  createdAt DateTime @default(now())
+
+  @@index([schoolId])
+  @@map("admins")
+}
+
+model Driver {
+  id        String   @id @default(uuid())
+  schoolId  String
+  school    School   @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  busId     String?  @unique @map("bus_id")
+  bus       Bus?     @relation(fields: [busId], references: [id])
+  email     String   @unique
+  password  String
+  name      String
+  phone     String?
+  createdAt DateTime @default(now())
+
+  @@index([schoolId])
+  @@map("drivers")
+}
+
+model Parent {
+  id        String   @id @default(uuid())
+  schoolId  String
+  school    School   @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  studentId String?  @unique @map("student_id")
+  student   Student? @relation(fields: [studentId], references: [id])
+  email     String   @unique
+  password  String
+  name      String
+  phone     String?
+  createdAt DateTime @default(now())
+
+  @@index([schoolId])
+  @@map("parents")
+}

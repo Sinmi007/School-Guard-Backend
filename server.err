@@ -1,0 +1,47 @@
+[31m[Nest] 19904  - [39m08/07/2026, 14:20:04 [31m  ERROR[39m [38;5;3m[ExceptionHandler] [39mUnknownDependenciesException [Error]: Nest can't resolve dependencies of the AdminService (PrismaService, ?, TokenService). Please make sure that the argument HashingService at index [1] is available in the AdminModule module.
+
+Potential solutions:
+- Is AdminModule a valid NestJS module?
+- If HashingService is a provider, is it part of the current AdminModule?
+- If HashingService is exported from a separate @Module, is that module imported within AdminModule?
+  @Module({
+    imports: [ /* the Module containing HashingService */ ]
+  })
+
+For more common dependency resolution issues, see: https://docs.nestjs.com/faq/common-errors
+    at Injector.lookupComponentInParentModules [90m(C:\Users\01aba\development\School-Guard-Backend\[39mnode_modules\[4m@nestjs[24m\core\injector\injector.js:300:19[90m)[39m
+[90m    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)[39m
+    at async resolveParam [90m(C:\Users\01aba\development\School-Guard-Backend\[39mnode_modules\[4m@nestjs[24m\core\injector\injector.js:150:38[90m)[39m
+    at async Promise.all (index 1)
+    at async Injector.resolveConstructorParams [90m(C:\Users\01aba\development\School-Guard-Backend\[39mnode_modules\[4m@nestjs[24m\core\injector\injector.js:179:27[90m)[39m
+    at async Injector.loadInstance [90m(C:\Users\01aba\development\School-Guard-Backend\[39mnode_modules\[4m@nestjs[24m\core\injector\injector.js:77:13[90m)[39m
+    at async Injector.loadProvider [90m(C:\Users\01aba\development\School-Guard-Backend\[39mnode_modules\[4m@nestjs[24m\core\injector\injector.js:111:9[90m)[39m
+    at async [90mC:\Users\01aba\development\School-Guard-Backend\[39mnode_modules\[4m@nestjs[24m\core\injector\instance-loader.js:56:13
+    at async Promise.all (index 3)
+    at async InstanceLoader.createInstancesOfProviders [90m(C:\Users\01aba\development\School-Guard-Backend\[39mnode_modules\[4m@nestjs[24m\core\injector\instance-loader.js:55:9[90m)[39m
+    at async [90mC:\Users\01aba\development\School-Guard-Backend\[39mnode_modules\[4m@nestjs[24m\core\injector\instance-loader.js:40:13
+    at async Promise.all (index 9)
+    at async InstanceLoader.createInstances [90m(C:\Users\01aba\development\School-Guard-Backend\[39mnode_modules\[4m@nestjs[24m\core\injector\instance-loader.js:39:9[90m)[39m
+    at async InstanceLoader.createInstancesOfDependencies [90m(C:\Users\01aba\development\School-Guard-Backend\[39mnode_modules\[4m@nestjs[24m\core\injector\instance-loader.js:22:13[90m)[39m
+    at async [90mC:\Users\01aba\development\School-Guard-Backend\[39mnode_modules\[4m@nestjs[24m\core\nest-factory.js:113:17
+    at async ExceptionsZone.asyncRun [90m(C:\Users\01aba\development\School-Guard-Backend\[39mnode_modules\[4m@nestjs[24m\core\errors\exceptions-zone.js:22:13[90m)[39m
+    at async NestFactoryStatic.initialize [90m(C:\Users\01aba\development\School-Guard-Backend\[39mnode_modules\[4m@nestjs[24m\core\nest-factory.js:111:13[90m)[39m
+    at async NestFactoryStatic.create [90m(C:\Users\01aba\development\School-Guard-Backend\[39mnode_modules\[4m@nestjs[24m\core\nest-factory.js:43:9[90m)[39m
+    at async bootstrap [90m(C:\Users\01aba\development\School-Guard-Backend\[39mdist\main.js:7:17[90m)[39m {
+  type: [32m'AdminService'[39m,
+  context: {
+    index: [33m1[39m,
+    dependencies: [
+      [36m[class PrismaService extends r][39m,
+      [36m[class HashingService][39m,
+      [36m[class TokenService][39m
+    ],
+    name: [36m[class HashingService][39m
+  },
+  metadata: {
+    id: [32m'4f4bdd012f2c281e09586'[39m
+  },
+  moduleRef: {
+    id: [32m'4861f94e7eef905e1c212'[39m
+  }
+}
