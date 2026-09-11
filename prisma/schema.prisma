@@ -8,27 +8,217 @@ datasource db {
 }
 
 // ---------------------------------------------------------------------------
-// Domain models (from the SmartSchool Bus Tracker PRD)
+// Enums
 // ---------------------------------------------------------------------------
 
-model School {
-  id        String   @id @default(uuid())
-  name      String
-  address   String
-  lat       Float
-  lng       Float
-  createdAt DateTime @default(now())
-
-  admins    Admin[]
-  drivers   Driver[]
-  parents   Parent[]
-  buses     Bus[]
-  students  Student[]
+enum UserRole {
+  SUPER_ADMIN
+  MAIN_ADMIN
+  MANAGER
+  DRIVER
+  PARENT
 }
+
+enum AccountStatus {
+  ACTIVE
+  SUSPENDED
+  DEACTIVATED
+}
+
+enum OnboardingStatus {
+  IN_PROGRESS
+  COMPLETED
+}
+
+enum ApprovalStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum MembershipStatus {
+  ACTIVE
+  SUSPENDED
+  DEACTIVATED
+}
+
+enum InvitationStatus {
+  PENDING
+  ACCEPTED
+  EXPIRED
+  REVOKED
+}
+
+enum NotificationType {
+  SCHOOL_REGISTERED
+  SCHOOL_APPROVED
+  SCHOOL_REJECTED
+  MANAGER_INVITED
+  MANAGER_ACCEPTED
+  MAIN_ADMIN_TRANSFERRED
+}
+
+// ---------------------------------------------------------------------------
+// Identity & tenancy
+// ---------------------------------------------------------------------------
+
+model User {
+  id           String        @id @default(uuid())
+  firstName    String
+  lastName     String
+  email        String        @unique
+  phone        String?
+  password     String
+  isSuperAdmin Boolean       @default(false) @map("is_super_admin")
+  status       AccountStatus @default(ACTIVE)
+  createdAt    DateTime      @default(now()) @map("created_at")
+  updatedAt    DateTime      @updatedAt @map("updated_at")
+
+  memberships              SchoolMembership[]
+  notifications            Notification[]
+  auditLogs                AuditLog[]
+  managerInvitationsMade   ManagerInvitation[] @relation("ManagerInviter")
+  managerInvitationsAccepted ManagerInvitation[] @relation("ManagerAccepted")
+
+  @@map("users")
+}
+
+model School {
+  id     String @id @default(uuid())
+  name   String
+  // Opaque, public-safe identifier used for school-scoped links (e.g. parent
+  // invites). Never expose the internal sequential/primary id in URLs.
+  publicToken String @unique @default(uuid()) @map("public_token")
+
+  accountStatus    AccountStatus    @default(ACTIVE) @map("account_status")
+  onboardingStatus OnboardingStatus @default(IN_PROGRESS) @map("onboarding_status")
+  approvalStatus   ApprovalStatus   @default(PENDING) @map("approval_status")
+
+  // Approval workflow audit fields
+  rejectionReason String?   @map("rejection_reason")
+  approvedAt      DateTime? @map("approved_at")
+  approvedBy      String?   @map("approved_by")
+  rejectedAt      DateTime? @map("rejected_at")
+  rejectedBy      String?   @map("rejected_by")
+
+  // Onboarding metadata (descriptive only — never operational records)
+  type                   String?
+  ownership              String?
+  logoUrl                String?   @map("logo_url")
+  website                String?
+  officialEmail          String?   @map("official_email")
+  officialPhone          String?   @map("official_phone")
+  altPhone               String?   @map("alt_phone")
+  country                String?
+  state                  String?
+  lga                    String?
+  city                   String?
+  fullAddress            String?   @map("full_address")
+  transportationSnapshot Json?     @map("transportation_snapshot")
+  goals                  String?
+  referralSource         String?   @map("referral_source")
+  onboardingCompletedAt  DateTime? @map("onboarding_completed_at")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  memberships        SchoolMembership[]
+  managerInvitations ManagerInvitation[]
+  auditLogs          AuditLog[]
+  notifications      Notification[]
+  buses              Bus[]
+  students           Student[]
+
+  @@index([approvalStatus])
+  @@map("schools")
+}
+
+model SchoolMembership {
+  id       String           @id @default(uuid())
+  userId   String           @map("user_id")
+  user     User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  schoolId String           @map("school_id")
+  school   School           @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  role     UserRole
+  status   MembershipStatus @default(ACTIVE)
+  createdAt DateTime        @default(now()) @map("created_at")
+  updatedAt DateTime        @updatedAt @map("updated_at")
+
+  @@unique([userId, schoolId])
+  @@index([schoolId, role])
+  @@map("school_memberships")
+}
+
+model ManagerInvitation {
+  id        String           @id @default(uuid())
+  schoolId  String           @map("school_id")
+  school    School           @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  email     String
+  firstName String           @map("first_name")
+  lastName  String           @map("last_name")
+  phone     String?
+  tokenHash String           @unique @map("token_hash")
+  status    InvitationStatus @default(PENDING)
+  expiresAt DateTime         @map("expires_at")
+  invitedById String?        @map("invited_by_id")
+  invitedBy   User?          @relation("ManagerInviter", fields: [invitedById], references: [id], onDelete: SetNull)
+  acceptedUserId String?     @map("accepted_user_id")
+  acceptedUser   User?       @relation("ManagerAccepted", fields: [acceptedUserId], references: [id], onDelete: SetNull)
+  createdAt DateTime         @default(now()) @map("created_at")
+  acceptedAt DateTime?       @map("accepted_at")
+
+  @@index([schoolId, status])
+  @@index([email])
+  @@map("manager_invitations")
+}
+
+// ---------------------------------------------------------------------------
+// Cross-cutting: audit + notifications
+// ---------------------------------------------------------------------------
+
+model AuditLog {
+  id         String   @id @default(uuid())
+  actorId    String?  @map("actor_id")
+  actor      User?    @relation(fields: [actorId], references: [id], onDelete: SetNull)
+  schoolId   String?  @map("school_id")
+  school     School?  @relation(fields: [schoolId], references: [id], onDelete: SetNull)
+  action     String
+  targetType String?  @map("target_type")
+  targetId   String?  @map("target_id")
+  metadata   Json?
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  @@index([schoolId, createdAt])
+  @@index([actorId])
+  @@map("audit_logs")
+}
+
+model Notification {
+  id        String           @id @default(uuid())
+  userId    String           @map("user_id")
+  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  schoolId  String?          @map("school_id")
+  school    School?          @relation(fields: [schoolId], references: [id], onDelete: SetNull)
+  type      NotificationType
+  title     String
+  body      String
+  readAt    DateTime?        @map("read_at")
+  createdAt DateTime         @default(now()) @map("created_at")
+
+  @@index([userId, readAt])
+  @@map("notifications")
+}
+
+// ---------------------------------------------------------------------------
+// Operational domain models (SmartSchool Bus Tracker PRD)
+// NOTE: relations to the removed portal auth tables (Driver/Parent) have been
+// dropped. These models remain structurally intact pending the operational
+// phase; no endpoints are wired to them in the foundation phase.
+// ---------------------------------------------------------------------------
 
 model Bus {
   id          String    @id @default(uuid())
-  schoolId    String
+  schoolId    String    @map("school_id")
   school      School    @relation(fields: [schoolId], references: [id], onDelete: Cascade)
   plateNumber String    @map("plate_number")
   driverName  String    @map("driver_name")
@@ -38,7 +228,6 @@ model Bus {
   lastLng     Float?    @map("last_lng")
   updatedAt   DateTime? @map("updated_at")
 
-  driver     Driver?
   students   Student[]
   telemetry  TelemetryLog[]
   events     ManifestEvent[]
@@ -49,10 +238,10 @@ model Bus {
 
 model Student {
   id            String  @id @default(uuid())
-  schoolId      String
+  schoolId      String  @map("school_id")
   school        School  @relation(fields: [schoolId], references: [id], onDelete: Cascade)
   busId         String? @map("bus_id")
-  bus           Bus?     @relation(fields: [busId], references: [id], onDelete: SetNull)
+  bus           Bus?    @relation(fields: [busId], references: [id], onDelete: SetNull)
   name          String
   parentName    String  @map("parent_name")
   parentPhone   String  @map("parent_phone")
@@ -60,7 +249,6 @@ model Student {
   homeLng       Float   @map("home_lng")
   paymentStatus String  @default("UNPAID") @map("payment_status")
 
-  parent        Parent?
   manifestEvents ManifestEvent[]
 
   @@index([schoolId])
@@ -95,53 +283,4 @@ model ManifestEvent {
   @@index([studentId])
   @@index([busId])
   @@map("manifest_events")
-}
-
-// ---------------------------------------------------------------------------
-// Authentication accounts (one per portal: admin, driver, parent)
-// ---------------------------------------------------------------------------
-
-model Admin {
-  id        String   @id @default(uuid())
-  schoolId  String
-  school    School   @relation(fields: [schoolId], references: [id], onDelete: Cascade)
-  email     String   @unique
-  password  String
-  name      String
-  createdAt DateTime @default(now())
-
-  @@index([schoolId])
-  @@map("admins")
-}
-
-model Driver {
-  id        String   @id @default(uuid())
-  schoolId  String
-  school    School   @relation(fields: [schoolId], references: [id], onDelete: Cascade)
-  busId     String?  @unique @map("bus_id")
-  bus       Bus?     @relation(fields: [busId], references: [id])
-  email     String   @unique
-  password  String
-  name      String
-  phone     String?
-  createdAt DateTime @default(now())
-
-  @@index([schoolId])
-  @@map("drivers")
-}
-
-model Parent {
-  id        String   @id @default(uuid())
-  schoolId  String
-  school    School   @relation(fields: [schoolId], references: [id], onDelete: Cascade)
-  studentId String?  @unique @map("student_id")
-  student   Student? @relation(fields: [studentId], references: [id])
-  email     String   @unique
-  password  String
-  name      String
-  phone     String?
-  createdAt DateTime @default(now())
-
-  @@index([schoolId])
-  @@map("parents")
 }

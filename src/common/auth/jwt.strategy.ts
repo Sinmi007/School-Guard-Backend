@@ -14,7 +14,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     });
   }
 
-  async validate(payload: AuthTokenPayload): Promise<AuthTokenPayload> {
+  validate(payload: AuthTokenPayload): AuthTokenPayload {
     if (!payload?.sub || !payload?.role) {
       throw new UnauthorizedException();
     }

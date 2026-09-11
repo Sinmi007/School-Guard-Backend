@@ -1,14 +1,18 @@
 import { Injectable } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
-
-export type UserRole = 'ADMIN' | 'DRIVER' | 'PARENT';
+import { UserRole } from '@prisma/client';
 
 export interface AuthTokenPayload {
+  /** User id. */
   sub: string;
   email: string;
   role: UserRole;
-  schoolId: string;
+  /** Absent for platform-level SUPER_ADMIN tokens. */
+  schoolId?: string;
+  membershipId?: string;
 }
+
+export { UserRole };
 
 @Injectable()
 export class TokenService {

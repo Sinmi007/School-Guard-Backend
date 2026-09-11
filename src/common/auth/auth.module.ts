@@ -5,6 +5,7 @@ import { PassportModule } from '@nestjs/passport';
 import { JwtStrategy } from './jwt.strategy';
 import { JwtAuthGuard } from './jwt-auth.guard';
 import { RolesGuard } from './roles.guard';
+import { SchoolApprovalGuard } from './school-approval.guard';
 import { TokenService } from './token.service';
 
 @Global()
@@ -22,7 +23,19 @@ import { TokenService } from './token.service';
       }),
     }),
   ],
-  providers: [JwtStrategy, JwtAuthGuard, RolesGuard, TokenService],
-  exports: [JwtAuthGuard, RolesGuard, TokenService, JwtModule],
+  providers: [
+    JwtStrategy,
+    JwtAuthGuard,
+    RolesGuard,
+    SchoolApprovalGuard,
+    TokenService,
+  ],
+  exports: [
+    JwtAuthGuard,
+    RolesGuard,
+    SchoolApprovalGuard,
+    TokenService,
+    JwtModule,
+  ],
 })
 export class AuthModule {}
