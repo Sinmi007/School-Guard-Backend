@@ -19,6 +19,13 @@ export const AuditAction = {
   ManagerInvited: 'manager_invited',
   ManagerAccepted: 'manager_accepted',
   MainAdminTransferred: 'main_admin_transferred',
+  // M3: Student management
+  StudentCreated: 'student_created',
+  StudentUpdated: 'student_updated',
+  StudentStatusChanged: 'student_status_changed',
+  StudentImportStarted: 'student_import_started',
+  StudentImportCompleted: 'student_import_completed',
+  StudentImportFailed: 'student_import_failed',
 } as const;
 
 @Injectable()

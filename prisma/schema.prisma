@@ -58,6 +58,46 @@ enum NotificationType {
   MAIN_ADMIN_TRANSFERRED
 }
 
+enum Gender {
+  MALE
+  FEMALE
+  OTHER
+}
+
+enum StudentStatus {
+  ACTIVE
+  INACTIVE
+  GRADUATED
+  TRANSFERRED_OUT
+}
+
+// Covers Nigerian school system: Nursery, Primary, Junior/Senior Secondary
+enum ClassGrade {
+  NURSERY_1
+  NURSERY_2
+  NURSERY_3
+  PRIMARY_1
+  PRIMARY_2
+  PRIMARY_3
+  PRIMARY_4
+  PRIMARY_5
+  PRIMARY_6
+  JSS_1
+  JSS_2
+  JSS_3
+  SS_1
+  SS_2
+  SS_3
+  OTHER
+}
+
+enum ImportStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
 // ---------------------------------------------------------------------------
 // Identity & tenancy
 // ---------------------------------------------------------------------------
@@ -79,6 +119,7 @@ model User {
   auditLogs                AuditLog[]
   managerInvitationsMade   ManagerInvitation[] @relation("ManagerInviter")
   managerInvitationsAccepted ManagerInvitation[] @relation("ManagerAccepted")
+  studentImports           StudentImport[]
 
   @@map("users")
 }
@@ -128,6 +169,7 @@ model School {
   notifications      Notification[]
   buses              Bus[]
   students           Student[]
+  studentImports     StudentImport[]
 
   @@index([approvalStatus])
   @@map("schools")
@@ -237,24 +279,87 @@ model Bus {
 }
 
 model Student {
-  id            String  @id @default(uuid())
-  schoolId      String  @map("school_id")
-  school        School  @relation(fields: [schoolId], references: [id], onDelete: Cascade)
-  busId         String? @map("bus_id")
-  bus           Bus?    @relation(fields: [busId], references: [id], onDelete: SetNull)
-  name          String
-  parentName    String  @map("parent_name")
-  parentPhone   String  @map("parent_phone")
-  homeLat       Float   @map("home_lat")
-  homeLng       Float   @map("home_lng")
-  paymentStatus String  @default("UNPAID") @map("payment_status")
+  id            String        @id @default(uuid())
+  // School-scoped, human-readable durable identifier (e.g. AJO-000482).
+  // Generated server-side; used by all downstream systems (routes, parents, trips).
+  studentId     String        @map("student_id")
+  schoolId      String        @map("school_id")
+  school        School        @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+
+  // Identity fields
+  firstName     String        @map("first_name")
+  lastName      String        @map("last_name")
+  dateOfBirth   DateTime      @map("date_of_birth") @db.Date
+  gender        Gender
+  classGrade    ClassGrade    @map("class_grade")
+  address       String
+
+  // Guardian info — pre-populates the M6 parent-linking flow
+  guardianName  String        @map("guardian_name")
+  guardianPhone String        @map("guardian_phone")
+
+  // Soft-delete semantics only: never hard-delete a student
+  status        StudentStatus @default(ACTIVE)
+
+  // Transportation assignment (placeholder; populated in M5)
+  busId         String?       @map("bus_id")
+  bus           Bus?          @relation(fields: [busId], references: [id], onDelete: SetNull)
 
   manifestEvents ManifestEvent[]
 
-  @@index([schoolId])
-  @@index([busId])
+  createdAt     DateTime      @default(now()) @map("created_at")
+  updatedAt     DateTime      @updatedAt @map("updated_at")
+
+  @@unique([schoolId, studentId])
+  @@index([schoolId, status])
+  @@index([schoolId, classGrade])
   @@map("students")
 }
+
+// ---------------------------------------------------------------------------
+// Student import pipeline (async job tracking)
+// ---------------------------------------------------------------------------
+
+model StudentImport {
+  id           String       @id @default(uuid())
+  schoolId     String       @map("school_id")
+  school       School       @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  actorId      String?      @map("actor_id")
+  actor        User?        @relation(fields: [actorId], references: [id], onDelete: SetNull)
+
+  status       ImportStatus @default(PENDING)
+  fileName     String       @map("file_name")
+  totalRows    Int?         @map("total_rows")
+  successCount Int?         @map("success_count")
+  errorCount   Int?         @map("error_count")
+  // Storage key for the uploaded file (allows re-processing)
+  storageKey   String       @map("storage_key")
+
+  rows         StudentImportRow[]
+
+  createdAt    DateTime     @default(now()) @map("created_at")
+  completedAt  DateTime?    @map("completed_at")
+
+  @@index([schoolId, status])
+  @@map("student_imports")
+}
+
+model StudentImportRow {
+  id            String        @id @default(uuid())
+  importId      String        @map("import_id")
+  import        StudentImport @relation(fields: [importId], references: [id], onDelete: Cascade)
+  rowIndex      Int           @map("row_index")
+  rawData       Json          @map("raw_data")
+  // Array of error descriptions for this row
+  errorMessages String[]      @map("error_messages")
+  isValid       Boolean       @map("is_valid")
+  // true if flagged as a probable duplicate (same name+DOB+class), but not a hard error
+  isDuplicate   Boolean       @default(false) @map("is_duplicate")
+
+  @@index([importId, isValid])
+  @@map("student_import_rows")
+}
+
 
 model TelemetryLog {
   id         BigInt   @id @default(autoincrement())

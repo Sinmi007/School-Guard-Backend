@@ -17,3 +17,7 @@ npm-debug.log*
 # editor
 .idea
 .vscode
+
+# PRDs and unnecessary markdown files
+*.md
+!README.md

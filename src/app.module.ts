@@ -18,6 +18,8 @@ import { AuthModule } from './modules/auth/auth.module';
 import { SchoolsModule } from './modules/schools/schools.module';
 import { SuperAdminModule } from './modules/super-admin/super-admin.module';
 import { AdministratorsModule } from './modules/administrators/administrators.module';
+import { StudentsModule } from './modules/students/students.module';
+
 
 @Module({
   imports: [
@@ -44,6 +46,8 @@ import { AdministratorsModule } from './modules/administrators/administrators.mo
     SchoolsModule,
     SuperAdminModule,
     AdministratorsModule,
+    StudentsModule,
+
   ],
   controllers: [AppController],
   providers: [
