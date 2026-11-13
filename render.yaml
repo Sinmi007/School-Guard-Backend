@@ -1,0 +1,49 @@
+# Render Blueprint — Dashboard → New → Blueprint → select this repo.
+# Database is hosted on Neon (not Render), so no `databases:` block here.
+# Variables marked `sync: false` are prompted for in the dashboard on first
+# deploy and are never stored in this file.
+services:
+  - type: web
+    name: school-guard-backend
+    runtime: node
+    plan: free
+    branch: main
+    # Pick the region closest to your Neon project region.
+    region: frankfurt
+    buildCommand: npm ci --include=dev && npm run build
+    # Free plan has no pre-deploy step, so migrations run on start
+    # (no-op when there is nothing new to apply).
+    startCommand: npx prisma migrate deploy && npm run start:prod
+    healthCheckPath: /
+    autoDeploy: true
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        sync: false
+      - key: DIRECT_URL
+        sync: false
+      - key: JWT_SECRET
+        generateValue: true
+      - key: JWT_EXPIRES_IN
+        value: 7d
+      - key: APP_BASE_URL
+        sync: false
+      - key: INVITATION_TTL_HOURS
+        value: "168"
+      - key: THROTTLE_TTL
+        value: "60000"
+      - key: THROTTLE_LIMIT
+        value: "100"
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_PORT
+        value: "587"
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASS
+        sync: false
+      - key: SMTP_FROM
+        value: SchoolGuard <no-reply@schoolguard.dev>
