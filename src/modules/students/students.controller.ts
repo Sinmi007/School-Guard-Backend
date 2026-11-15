@@ -42,47 +42,9 @@ export class StudentsController {
   ) {}
 
   // ---------------------------------------------------------------------------
-  // CRUD
-  // ---------------------------------------------------------------------------
-
-  @Get()
-  findAll(
-    @CurrentUser() user: AuthTokenPayload,
-    @Query() query: ListStudentsQueryDto,
-  ) {
-    return this.studentsService.findAll(user, query);
-  }
-
-  @Get(':id')
-  findOne(@CurrentUser() user: AuthTokenPayload, @Param('id') id: string) {
-    return this.studentsService.findOne(user, id);
-  }
-
-  @Post()
-  create(
-    @CurrentUser() user: AuthTokenPayload,
-    @Body() dto: CreateStudentDto,
-  ) {
-    return this.studentsService.create(user, dto);
-  }
-
-  @Patch(':id')
-  update(
-    @CurrentUser() user: AuthTokenPayload,
-    @Param('id') id: string,
-    @Body() dto: UpdateStudentDto,
-  ) {
-    return this.studentsService.update(user, id, dto);
-  }
-
-  /** Soft-delete: transitions status → TRANSFERRED_OUT */
-  @Delete(':id')
-  remove(@CurrentUser() user: AuthTokenPayload, @Param('id') id: string) {
-    return this.studentsService.softDelete(user, id);
-  }
-
-  // ---------------------------------------------------------------------------
   // Import pipeline
+  // NOTE: these static routes MUST be declared before the `:id` routes below,
+  // otherwise `GET /students/imports` is captured by `GET /students/:id`.
   // ---------------------------------------------------------------------------
 
   /** Upload CSV/XLSX → queues background job → returns { importId } immediately */
@@ -135,5 +97,45 @@ export class StudentsController {
     @Param('importId') importId: string,
   ) {
     return this.importService.confirm(user, importId);
+  }
+
+  // ---------------------------------------------------------------------------
+  // CRUD
+  // ---------------------------------------------------------------------------
+
+  @Get()
+  findAll(
+    @CurrentUser() user: AuthTokenPayload,
+    @Query() query: ListStudentsQueryDto,
+  ) {
+    return this.studentsService.findAll(user, query);
+  }
+
+  @Get(':id')
+  findOne(@CurrentUser() user: AuthTokenPayload, @Param('id') id: string) {
+    return this.studentsService.findOne(user, id);
+  }
+
+  @Post()
+  create(
+    @CurrentUser() user: AuthTokenPayload,
+    @Body() dto: CreateStudentDto,
+  ) {
+    return this.studentsService.create(user, dto);
+  }
+
+  @Patch(':id')
+  update(
+    @CurrentUser() user: AuthTokenPayload,
+    @Param('id') id: string,
+    @Body() dto: UpdateStudentDto,
+  ) {
+    return this.studentsService.update(user, id, dto);
+  }
+
+  /** Soft-delete: transitions status → TRANSFERRED_OUT */
+  @Delete(':id')
+  remove(@CurrentUser() user: AuthTokenPayload, @Param('id') id: string) {
+    return this.studentsService.softDelete(user, id);
   }
 }
