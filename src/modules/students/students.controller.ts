@@ -5,6 +5,7 @@ import {
   Delete,
   Get,
   Param,
+  ParseUUIDPipe,
   Patch,
   Post,
   Query,
@@ -12,25 +13,26 @@ import {
   UseInterceptors,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
+import { Throttle } from '@nestjs/throttler';
 import { UserRole } from '@prisma/client';
 import { memoryStorage } from 'multer';
 import { CurrentUser } from '../../common/auth/current-user.decorator';
 import { RequireApprovedSchool } from '../../common/auth/require-approved-school.decorator';
 import { Roles } from '../../common/auth/roles.decorator';
 import type { AuthTokenPayload } from '../../common/auth/token.service';
+import { ConfirmImportDto } from './dto/confirm-import.dto';
 import { CreateStudentDto } from './dto/create-student.dto';
 import { ListStudentsQueryDto } from './dto/list-students-query.dto';
 import { UpdateStudentDto } from './dto/update-student.dto';
 import { StudentImportService } from './student-import.service';
 import { StudentsService } from './students.service';
 
-const ALLOWED_MIME = [
-  'text/csv',
-  'application/csv',
-  'application/vnd.ms-excel',
-  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-];
-const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024; // 10 MB
+// Browsers label spreadsheets inconsistently (Windows often sends CSVs as
+// application/vnd.ms-excel), so the MIME type is ignored here: the filter
+// only checks the extension, and the service then verifies the actual bytes
+// match it (detectFileKind) before parsing.
+const ALLOWED_EXTENSION = /\.(csv|xlsx)$/i;
+const MAX_FILE_SIZE_BYTES = 5 * 1024 * 1024; // 5 MB ≈ well over 5,000 rows
 
 @RequireApprovedSchool()
 @Roles(UserRole.MAIN_ADMIN, UserRole.MANAGER)
@@ -47,19 +49,24 @@ export class StudentsController {
   // otherwise `GET /students/imports` is captured by `GET /students/:id`.
   // ---------------------------------------------------------------------------
 
-  /** Upload CSV/XLSX → queues background job → returns { importId } immediately */
+  /**
+   * Upload a .csv or .xlsx → validates every row and returns the preview
+   * (valid, errored and possible-duplicate rows). Nothing is saved as a
+   * student until POST imports/:importId/confirm.
+   */
   @Post('import')
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
   @UseInterceptors(
     FileInterceptor('file', {
       storage: memoryStorage(),
-      limits: { fileSize: MAX_FILE_SIZE_BYTES },
+      limits: { fileSize: MAX_FILE_SIZE_BYTES, files: 1 },
       fileFilter: (_req, file, cb) => {
-        if (ALLOWED_MIME.includes(file.mimetype)) {
+        if (ALLOWED_EXTENSION.test(file.originalname)) {
           cb(null, true);
         } else {
           cb(
             new BadRequestException(
-              'Only CSV or Excel files are accepted (.csv, .xls, .xlsx)',
+              'Only .csv and .xlsx files are accepted. For old .xls files, use File → Save As → .xlsx in Excel.',
             ),
             false,
           );
@@ -72,7 +79,7 @@ export class StudentsController {
     @UploadedFile() file: Express.Multer.File,
   ) {
     if (!file) throw new BadRequestException('No file uploaded');
-    return this.importService.enqueue(user, file.originalname, file.buffer);
+    return this.importService.upload(user, file.originalname, file.buffer);
   }
 
   /** List all import jobs for this school (newest first) */
@@ -81,22 +88,26 @@ export class StudentsController {
     return this.importService.listImports(user);
   }
 
-  /** Poll a specific import job: status + per-row results */
+  /** Import detail: status, counts and every row's errors/duplicate flags */
   @Get('imports/:importId')
   getImport(
     @CurrentUser() user: AuthTokenPayload,
-    @Param('importId') importId: string,
+    @Param('importId', ParseUUIDPipe) importId: string,
   ) {
     return this.importService.getImport(user, importId);
   }
 
-  /** Commit the valid rows from a COMPLETED import job */
+  /**
+   * Commit the valid rows of a previewed import, optionally leaving out rows
+   * by index (e.g. flagged duplicates). All-or-nothing; only works once.
+   */
   @Post('imports/:importId/confirm')
   confirmImport(
     @CurrentUser() user: AuthTokenPayload,
-    @Param('importId') importId: string,
+    @Param('importId', ParseUUIDPipe) importId: string,
+    @Body() dto: ConfirmImportDto,
   ) {
-    return this.importService.confirm(user, importId);
+    return this.importService.confirm(user, importId, dto);
   }
 
   // ---------------------------------------------------------------------------
@@ -111,16 +122,19 @@ export class StudentsController {
     return this.studentsService.findAll(user, query);
   }
 
+  /** Counts by status + active students without transport (dashboard tiles) */
+  @Get('summary')
+  summary(@CurrentUser() user: AuthTokenPayload) {
+    return this.studentsService.summary(user);
+  }
+
   @Get(':id')
   findOne(@CurrentUser() user: AuthTokenPayload, @Param('id') id: string) {
     return this.studentsService.findOne(user, id);
   }
 
   @Post()
-  create(
-    @CurrentUser() user: AuthTokenPayload,
-    @Body() dto: CreateStudentDto,
-  ) {
+  create(@CurrentUser() user: AuthTokenPayload, @Body() dto: CreateStudentDto) {
     return this.studentsService.create(user, dto);
   }
 

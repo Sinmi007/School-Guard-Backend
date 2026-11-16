@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-explicit-any */
+/* eslint-disable @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-return */
 import { Test, TestingModule } from '@nestjs/testing';
 import { StudentsService } from './students.service';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -6,7 +6,7 @@ import { AuditService } from '../audit/audit.service';
 import { ClassGrade, Gender, UserRole } from '@prisma/client';
 import { AuthTokenPayload } from '../../common/auth/token.service';
 
-const mockPrismaService = {
+const mockPrismaService: any = {
   student: {
     create: jest.fn(),
     findMany: jest.fn(),
@@ -14,6 +14,11 @@ const mockPrismaService = {
     findFirst: jest.fn(),
     update: jest.fn(),
   },
+  school: {
+    update: jest.fn(),
+  },
+  // Interactive transactions just run the callback against the same mock.
+  $transaction: jest.fn((fn: (tx: any) => unknown) => fn(mockPrismaService)),
 };
 
 const mockAuditService = {
@@ -65,13 +70,21 @@ describe('StudentsService', () => {
         guardianPhone: '08012345678',
       };
 
-      prisma.student.findFirst.mockResolvedValue(null);
       prisma.student.count.mockResolvedValue(0);
-      prisma.student.create.mockResolvedValue({ id: 'stu-1', ...createDto });
+      prisma.school.update.mockResolvedValue({ studentIdSeq: 42 });
+      prisma.student.create.mockImplementation(({ data }: any) => ({
+        id: 'stu-1',
+        ...data,
+      }));
 
       const result = await service.create(mockAdminUser, createDto);
-      expect(result).toBeDefined();
-      expect(prisma.student.create).toHaveBeenCalled();
+      expect(result.studentId).toBe('AJO-000042');
+      expect(prisma.school.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'school-1' },
+          data: { studentIdSeq: { increment: 1 } },
+        }),
+      );
       expect(mockAuditService.log).toHaveBeenCalled();
     });
   });

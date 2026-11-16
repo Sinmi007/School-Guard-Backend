@@ -98,8 +98,11 @@ enum ClassGrade {
 enum ImportStatus {
   PENDING
   PROCESSING
+  // Validated; preview ready, awaiting admin confirmation
   COMPLETED
   FAILED
+  // Admin confirmed; valid rows committed as students (terminal)
+  CONFIRMED
 }
 
 // ---------------------------------------------------------------------------
@@ -164,6 +167,10 @@ model School {
   referralSource         String?   @map("referral_source")
   onboardingCompletedAt  DateTime? @map("onboarding_completed_at")
 
+  // Last allocated number for generated studentIds (AJO-000001, ...).
+  // Incremented atomically — never derive IDs from a row count.
+  studentIdSeq Int @default(0) @map("student_id_seq")
+
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
@@ -174,6 +181,7 @@ model School {
   buses              Bus[]
   students           Student[]
   studentImports     StudentImport[]
+  studentTransportAssignments StudentTransportAssignment[]
 
   @@index([approvalStatus])
   @@map("schools")
@@ -274,7 +282,7 @@ model Bus {
   lastLng     Float?    @map("last_lng")
   updatedAt   DateTime? @map("updated_at")
 
-  students   Student[]
+  studentAssignments StudentTransportAssignment[]
   telemetry  TelemetryLog[]
   events     ManifestEvent[]
 
@@ -305,9 +313,9 @@ model Student {
   // Soft-delete semantics only: never hard-delete a student
   status        StudentStatus @default(ACTIVE)
 
-  // Transportation assignment (placeholder; populated in M5)
-  busId         String?       @map("bus_id")
-  bus           Bus?          @relation(fields: [busId], references: [id], onDelete: SetNull)
+  // Transportation lives in its own table so M5 (Buses & Routes) can populate
+  // it without touching student identity. No row = not assigned.
+  transportAssignment StudentTransportAssignment?
 
   manifestEvents ManifestEvent[]
 
@@ -318,6 +326,27 @@ model Student {
   @@index([schoolId, status])
   @@index([schoolId, classGrade])
   @@map("students")
+}
+
+/// A student's current transportation assignment (PRD M3 §3). Separate from
+/// student identity; populated by Milestone 5. routeId / pickupStopId become
+/// foreign keys once the Route and Stop models exist.
+model StudentTransportAssignment {
+  id           String   @id @default(uuid())
+  studentId    String   @unique @map("student_id")
+  student      Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  schoolId     String   @map("school_id")
+  school       School   @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  busId        String?  @map("bus_id")
+  bus          Bus?     @relation(fields: [busId], references: [id], onDelete: SetNull)
+  routeId      String?  @map("route_id")
+  pickupStopId String?  @map("pickup_stop_id")
+  assignedAt   DateTime @default(now()) @map("assigned_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  @@index([schoolId])
+  @@index([busId])
+  @@map("student_transport_assignments")
 }
 
 // ---------------------------------------------------------------------------
@@ -336,13 +365,21 @@ model StudentImport {
   totalRows    Int?         @map("total_rows")
   successCount Int?         @map("success_count")
   errorCount   Int?         @map("error_count")
-  // Storage key for the uploaded file (allows re-processing)
+  // Rows flagged as probable duplicates (warning only, still importable)
+  duplicateCount Int?       @map("duplicate_count")
+  // Rows actually inserted as students on confirm
+  committedCount Int?       @map("committed_count")
+  // Why the import FAILED (bad structure, too many rows, ...)
+  failureReason String?     @map("failure_reason")
+  // "sha256:<hex>" fingerprint of the uploaded file (file content itself is
+  // not stored; parsed rows live in StudentImportRow.rawData)
   storageKey   String       @map("storage_key")
 
   rows         StudentImportRow[]
 
   createdAt    DateTime     @default(now()) @map("created_at")
   completedAt  DateTime?    @map("completed_at")
+  confirmedAt  DateTime?    @map("confirmed_at")
 
   @@index([schoolId, status])
   @@map("student_imports")
@@ -359,6 +396,10 @@ model StudentImportRow {
   isValid       Boolean       @map("is_valid")
   // true if flagged as a probable duplicate (same name+DOB+class), but not a hard error
   isDuplicate   Boolean       @default(false) @map("is_duplicate")
+  // What the probable duplicate collided with, e.g. "AJO-000012" or "row 4"
+  duplicateOf   String?       @map("duplicate_of")
+  // studentId assigned when this row was committed (null = not committed)
+  committedStudentId String?  @map("committed_student_id")
 
   @@index([importId, isValid])
   @@map("student_import_rows")

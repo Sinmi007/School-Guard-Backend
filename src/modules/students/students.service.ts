@@ -4,22 +4,14 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { ClassGrade, Gender, Prisma, StudentStatus } from '@prisma/client';
+import { Prisma, StudentStatus } from '@prisma/client';
 import { AuthTokenPayload } from '../../common/auth/token.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditAction, AuditService } from '../audit/audit.service';
 import { CreateStudentDto } from './dto/create-student.dto';
 import { ListStudentsQueryDto } from './dto/list-students-query.dto';
 import { UpdateStudentDto } from './dto/update-student.dto';
-
-/** Zero-padded school-scoped studentId, e.g. AJO-000001 */
-async function generateStudentId(
-  prisma: PrismaService,
-  schoolId: string,
-): Promise<string> {
-  const count = await prisma.student.count({ where: { schoolId } });
-  return `AJO-${String(count + 1).padStart(6, '0')}`;
-}
+import { allocateStudentIds } from './student-id.allocator';
 
 @Injectable()
 export class StudentsService {
@@ -41,23 +33,32 @@ export class StudentsService {
 
   async create(user: AuthTokenPayload, dto: CreateStudentDto) {
     const schoolId = this.requireSchool(user);
-    const studentId = await generateStudentId(this.prisma, schoolId);
 
-    const student = await this.prisma.student.create({
-      data: {
-        studentId,
+    const student = await this.prisma.$transaction(async (tx) => {
+      const [studentId] = await allocateStudentIds(
+        tx,
         schoolId,
-        firstName: dto.firstName,
-        lastName: dto.lastName,
-        dateOfBirth: new Date(dto.dateOfBirth),
-        gender: dto.gender as Gender,
-        classGrade: dto.classGrade as ClassGrade,
-        address: dto.address,
-        guardianName: dto.guardianName,
-        guardianPhone: dto.guardianPhone,
-        status: StudentStatus.ACTIVE,
-      },
+        1,
+        async (id) =>
+          (await tx.student.count({ where: { schoolId, studentId: id } })) > 0,
+      );
+      return tx.student.create({
+        data: {
+          studentId,
+          schoolId,
+          firstName: dto.firstName,
+          lastName: dto.lastName,
+          dateOfBirth: new Date(dto.dateOfBirth),
+          gender: dto.gender,
+          classGrade: dto.classGrade,
+          address: dto.address,
+          guardianName: dto.guardianName,
+          guardianPhone: dto.guardianPhone,
+          status: StudentStatus.ACTIVE,
+        },
+      });
     });
+    const { studentId } = student;
 
     await this.audit.log({
       actorId: user.sub,
@@ -73,19 +74,37 @@ export class StudentsService {
 
   async findAll(user: AuthTokenPayload, query: ListStudentsQueryDto) {
     const schoolId = this.requireSchool(user);
-    const { search, classGrade, status, page = 1, limit = 20 } = query;
+    const {
+      search,
+      classGrade,
+      status,
+      transport,
+      page = 1,
+      limit = 20,
+    } = query;
     const skip = (page - 1) * limit;
+
+    // Every word must match some field, so "ada obi" finds Ada Obi.
+    const terms = (search ?? '')
+      .trim()
+      .split(/\s+/)
+      .filter(Boolean)
+      .slice(0, 5);
 
     const where: Prisma.StudentWhereInput = {
       schoolId,
       ...(classGrade && { classGrade }),
       ...(status && { status }),
-      ...(search && {
-        OR: [
-          { firstName: { contains: search, mode: 'insensitive' } },
-          { lastName: { contains: search, mode: 'insensitive' } },
-          { studentId: { contains: search, mode: 'insensitive' } },
-        ],
+      ...(transport === 'ASSIGNED' && { transportAssignment: { isNot: null } }),
+      ...(transport === 'UNASSIGNED' && { transportAssignment: { is: null } }),
+      ...(terms.length && {
+        AND: terms.map((t) => ({
+          OR: [
+            { firstName: { contains: t, mode: 'insensitive' as const } },
+            { lastName: { contains: t, mode: 'insensitive' as const } },
+            { studentId: { contains: t, mode: 'insensitive' as const } },
+          ],
+        })),
       }),
     };
 
@@ -95,6 +114,7 @@ export class StudentsService {
         skip,
         take: limit,
         orderBy: { createdAt: 'desc' },
+        include: { transportAssignment: true },
       }),
       this.prisma.student.count({ where }),
     ]);
@@ -109,9 +129,40 @@ export class StudentsService {
     const schoolId = this.requireSchool(user);
     const student = await this.prisma.student.findFirst({
       where: { id, schoolId },
+      include: { transportAssignment: true },
     });
     if (!student) throw new NotFoundException('Student not found');
     return student;
+  }
+
+  /** Roster counts for dashboard tiles. */
+  async summary(user: AuthTokenPayload) {
+    const schoolId = this.requireSchool(user);
+    const [byStatus, activeWithoutTransport] = await Promise.all([
+      this.prisma.student.groupBy({
+        by: ['status'],
+        where: { schoolId },
+        _count: { _all: true },
+      }),
+      this.prisma.student.count({
+        where: {
+          schoolId,
+          status: StudentStatus.ACTIVE,
+          transportAssignment: { is: null },
+        },
+      }),
+    ]);
+
+    const counts = Object.fromEntries(
+      Object.values(StudentStatus).map((s) => [s, 0]),
+    ) as Record<StudentStatus, number>;
+    for (const row of byStatus) counts[row.status] = row._count._all;
+
+    return {
+      total: Object.values(counts).reduce((a, b) => a + b, 0),
+      byStatus: counts,
+      activeWithoutTransport,
+    };
   }
 
   async update(user: AuthTokenPayload, id: string, dto: UpdateStudentDto) {
@@ -134,10 +185,8 @@ export class StudentsService {
         ...(dto.dateOfBirth !== undefined && {
           dateOfBirth: new Date(dto.dateOfBirth),
         }),
-        ...(dto.gender !== undefined && { gender: dto.gender as Gender }),
-        ...(dto.classGrade !== undefined && {
-          classGrade: dto.classGrade as ClassGrade,
-        }),
+        ...(dto.gender !== undefined && { gender: dto.gender }),
+        ...(dto.classGrade !== undefined && { classGrade: dto.classGrade }),
         ...(dto.address !== undefined && { address: dto.address }),
         ...(dto.guardianName !== undefined && {
           guardianName: dto.guardianName,

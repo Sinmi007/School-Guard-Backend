@@ -23,8 +23,11 @@ export const AuditAction = {
   StudentCreated: 'student_created',
   StudentUpdated: 'student_updated',
   StudentStatusChanged: 'student_status_changed',
+  /** File uploaded and validation started. */
   StudentImportStarted: 'student_import_started',
+  /** Admin confirmed; valid rows committed as students. */
   StudentImportCompleted: 'student_import_completed',
+  /** File rejected (bad structure, too many rows, parse error). */
   StudentImportFailed: 'student_import_failed',
 } as const;
 

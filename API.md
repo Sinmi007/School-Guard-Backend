@@ -22,7 +22,8 @@ operational features unlock.
 8. [Invitation Acceptance](#invitation-acceptance)
 9. [Notifications](#notifications)
 10. [Audit Logs](#audit-logs)
-11. [Error Codes](#error-codes)
+11. [Students](#students)
+12. [Error Codes](#error-codes)
 
 ---
 
@@ -308,7 +309,77 @@ targetId, metadata, createdAt`.
 
 Logged events include: `school_registered`, `onboarding_completed`,
 `school_approved`, `school_rejected`, `manager_invited`, `manager_accepted`,
-`main_admin_transferred`.
+`main_admin_transferred`, `student_created`, `student_updated`,
+`student_status_changed`, `student_import_started` (file uploaded),
+`student_import_completed` (rows committed on confirm), `student_import_failed`
+(file rejected).
+
+---
+
+## Students
+
+Roles: `MAIN_ADMIN`, `MANAGER`. **Every endpoint requires an `APPROVED` school**
+(`403` otherwise). All data is scoped to the caller's school.
+
+`studentId` is the school-scoped durable identifier. It is generated as
+`AJO-000001`, `AJO-000002`, … from a per-school counter (safe under concurrent
+requests), or taken from the CSV when the file supplies one.
+
+| Method & path | Description |
+|---|---|
+| `GET /students?search=&classGrade=&status=&transport=&page=1&limit=20` | List/search. `search` matches name or `studentId` (every word must match, so `ada obi` works). `transport` = `ASSIGNED`\|`UNASSIGNED`. `limit` ≤ 100. Returns `{ data, meta: { total, page, limit, totalPages } }`; each student includes `transportAssignment` (null until Milestone 5) |
+| `GET /students/summary` | `{ total, byStatus: { ACTIVE, INACTIVE, GRADUATED, TRANSFERRED_OUT }, activeWithoutTransport }` |
+| `GET /students/:id` | One student (with `transportAssignment`) |
+| `POST /students` | Create. Body: `firstName, lastName, dateOfBirth (YYYY-MM-DD, not in the future), gender (MALE\|FEMALE\|OTHER), classGrade (NURSERY_1…SS_3\|OTHER), address, guardianName, guardianPhone` |
+| `PATCH /students/:id` | Partial update (`studentId` is immutable); `status` (`ACTIVE\|INACTIVE\|GRADUATED\|TRANSFERRED_OUT`) changes are audited with from/to |
+| `DELETE /students/:id` | Soft delete → `TRANSFERRED_OUT` (never hard-deleted) |
+
+### CSV import (two steps)
+
+**1. `POST /students/import`** — `multipart/form-data`, field `file`.
+- `.csv` or `.xlsx` (first worksheet; max 5 MB, 5,000 rows). The file's
+  bytes must match its extension. Legacy `.xls` is rejected with a message to
+  re-save as `.xlsx`. Rate limited to 5 uploads/minute.
+- Header names are flexible (case/spaces ignored), e.g. `First Name`/`firstName`,
+  `Surname`/`lastName`, `DOB`, `Sex` (`M`/`F` accepted), `Class` (`Primary 3`,
+  `JSS1` accepted), `Parent Name`, `Parent Phone`. Optional `Student ID` /
+  `Admission No` column keeps the school's own IDs.
+- Dates: `YYYY-MM-DD` or day-first `DD/MM/YYYY` (also `-` / `.`), or real
+  Excel date cells. Excel-mangled phone numbers (`8012345678`) get their
+  leading `0` restored. Excel formula cells are never evaluated — the row is
+  rejected.
+- Validates synchronously and returns the preview. **Nothing is saved as a
+  student yet.**
+
+```json
+{
+  "importId": "uuid",
+  "status": "COMPLETED",
+  "totalRows": 7, "validCount": 4, "errorCount": 3, "duplicateCount": 2,
+  "errorRows": [ { "rowIndex": 2, "errors": ["studentId ADM-1 also appears in row 0"] } ],
+  "duplicateRows": [ { "rowIndex": 4, "duplicateOf": "row 0" },
+                     { "rowIndex": 6, "duplicateOf": "AJO-000001" } ]
+}
+```
+
+- `errorRows` are never imported (missing/invalid fields, duplicate `studentId`
+  in the file or already in the school, spreadsheet formulas in cells).
+- `duplicateRows` are *warnings* (same name + date of birth + class as an
+  existing student or an earlier row) — imported unless excluded in step 2.
+- A structurally bad file (missing columns, no rows, too many rows) returns
+  `400` with `{ message, importId }` and is recorded as a `FAILED` import.
+
+**2. `POST /students/imports/:importId/confirm`** — body (optional):
+`{ "excludeRowIndexes": [6] }`. Commits all valid rows except the excluded
+ones, all-or-nothing. Returns `{ committed, excluded, students: [{ rowIndex, studentId }] }`.
+A second confirm returns `409`.
+
+**History:** `GET /students/imports` (newest first: status, counts,
+`committedCount`, `failureReason`) and `GET /students/imports/:importId`
+(every row with `errorMessages`, `isDuplicate`, `duplicateOf`,
+`committedStudentId`).
+
+Import status: `PROCESSING` → `COMPLETED` (preview ready) → `CONFIRMED`, or `FAILED`.
 
 ---
 
