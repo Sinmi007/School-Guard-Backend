@@ -11,11 +11,20 @@ export class AuditController {
 
   @Roles(UserRole.MAIN_ADMIN)
   @Get()
-  list(@CurrentUser() user: AuthTokenPayload) {
-    return this.prisma.auditLog.findMany({
+  async list(@CurrentUser() user: AuthTokenPayload) {
+    const logs = await this.prisma.auditLog.findMany({
       where: { schoolId: user.schoolId },
       orderBy: { createdAt: 'desc' },
       take: 200,
+      include: {
+        actor: { select: { firstName: true, lastName: true, email: true } },
+      },
     });
+    // Flatten the actor so the UI can show who did what.
+    return logs.map(({ actor, ...log }) => ({
+      ...log,
+      actorName: actor ? `${actor.firstName} ${actor.lastName}`.trim() : null,
+      actorEmail: actor?.email ?? null,
+    }));
   }
 }

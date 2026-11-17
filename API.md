@@ -352,8 +352,9 @@ Marks one of the caller's notifications as read.
 ### `GET /audit-logs`
 
 Roles: `MAIN_ADMIN`. Returns the school's audit trail (most recent 200), scoped
-to the caller's school. Entries record `actorId, schoolId, action, targetType,
-targetId, metadata, createdAt`.
+to the caller's school, as a plain array. Entries record `actorId, schoolId,
+action, targetType, targetId, metadata, createdAt`, plus `actorName` and
+`actorEmail` (null when the actor has been deleted).
 
 Logged events include: `school_registered`, `onboarding_completed`,
 `school_approved`, `school_rejected`, `manager_invited`, `manager_accepted`,
