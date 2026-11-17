@@ -8,26 +8,32 @@ import { RejectSchoolDto } from './dto/reject-school.dto';
 import { SuperAdminService } from './super-admin.service';
 
 @Roles(UserRole.SUPER_ADMIN)
-@Controller('super-admin/schools')
+@Controller('super-admin')
 export class SuperAdminController {
   constructor(private readonly superAdminService: SuperAdminService) {}
 
-  @Get()
+  /** Platform-wide counts for the Super Admin dashboard. */
+  @Get('overview')
+  overview() {
+    return this.superAdminService.overview();
+  }
+
+  @Get('schools')
   list(@Query() query: ListSchoolsQueryDto) {
     return this.superAdminService.listSchools(query);
   }
 
-  @Get(':id')
+  @Get('schools/:id')
   getOne(@Param('id') id: string) {
     return this.superAdminService.getSchool(id);
   }
 
-  @Post(':id/approve')
+  @Post('schools/:id/approve')
   approve(@CurrentUser() actor: AuthTokenPayload, @Param('id') id: string) {
     return this.superAdminService.approve(actor, id);
   }
 
-  @Post(':id/reject')
+  @Post('schools/:id/reject')
   reject(
     @CurrentUser() actor: AuthTokenPayload,
     @Param('id') id: string,

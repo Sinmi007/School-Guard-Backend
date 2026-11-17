@@ -14,6 +14,8 @@ export interface AuditEntry {
 export const AuditAction = {
   SchoolRegistered: 'school_registered',
   OnboardingCompleted: 'onboarding_completed',
+  SchoolDetailsUpdated: 'school_details_updated',
+  SchoolResubmitted: 'school_resubmitted',
   SchoolApproved: 'school_approved',
   SchoolRejected: 'school_rejected',
   ManagerInvited: 'manager_invited',

@@ -67,6 +67,31 @@ export class NotificationsService {
     );
   }
 
+  /** A rejected school corrected its details and asked for another review. */
+  async notifySuperAdminsOfResubmission(school: SchoolRef): Promise<void> {
+    const superAdmins = await this.prisma.user.findMany({
+      where: { isSuperAdmin: true, status: AccountStatus.ACTIVE },
+      select: { id: true, email: true },
+    });
+
+    await Promise.all(
+      superAdmins.map(async (admin) => {
+        await this.createInApp(
+          admin.id,
+          school.id,
+          NotificationType.SCHOOL_REGISTERED,
+          'School resubmitted for approval',
+          `${school.name} updated its details after a rejection and is pending approval again.`,
+        );
+        await this.email.sendMail({
+          to: admin.email,
+          subject: `School resubmitted: ${school.name}`,
+          html: `<p><strong>${school.name}</strong> updated its details after being rejected and is awaiting review again.</p>`,
+        });
+      }),
+    );
+  }
+
   async notifySchoolApproved(
     school: SchoolRef,
     mainAdmin: UserRef,

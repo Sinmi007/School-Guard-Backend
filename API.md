@@ -84,8 +84,18 @@ server-side, independent of frontend state, via a centralized guard. While a
 school is `PENDING` or `REJECTED`, operational mutations are blocked with
 `403`; the school's own dashboard/status remains **readable**.
 
-Operational endpoints (later phase) will declare the gate; the infrastructure is
-in place now.
+What a school can do at each status:
+
+| | `PENDING` | `REJECTED` | `APPROVED` |
+|---|---|---|---|
+| View school, dashboard counts, audit logs, administrators | ✅ | ✅ | ✅ |
+| Edit school details (`PATCH /schools/me`) | ❌ `409` (under review) | ✅ | ✅ |
+| Resubmit (`POST /schools/resubmit`) | — | ✅ | — |
+| Invite managers | ❌ `403` | ❌ `403` | ✅ |
+| Students (all endpoints) | ❌ `403` | ❌ `403` | ✅ |
+
+Future operational endpoints (drivers, buses, routes, parents, trips) declare
+the same gate.
 
 ---
 
@@ -172,7 +182,21 @@ Always returns `{ "success": true }`.
 ### `GET /schools/me`
 
 Roles: `MAIN_ADMIN`, `MANAGER`. Viewable **before** approval. Returns the school
-with all statuses and the Main Admin's contact details.
+with all statuses, the Main Admin's contact details, and the transport
+estimates as flat fields (`busCount`, `driverCount`, `studentCount`,
+`transportationModel`, `currentTransportationProvision`).
+
+### `GET /schools/me/overview`
+
+Roles: `MAIN_ADMIN`, `MANAGER`. Dashboard counts, available at any status
+(a pending school sees zeros):
+
+```json
+{
+  "students": { "total": 0, "active": 0, "activeWithoutTransport": 0 },
+  "administrators": { "managers": 0, "pendingInvitations": 0, "maxManagers": 5 }
+}
+```
 
 ### `POST /schools/onboarding`
 
@@ -198,16 +222,21 @@ parents).
 }
 ```
 
-Onboarding completion never auto-approves a school.
+Onboarding completion never auto-approves a school. It can only be submitted
+once — a second call returns `409`; later changes go through `PATCH /schools/me`.
 
 ### `PATCH /schools/me`
 
-Roles: `MAIN_ADMIN`. Edits onboarding metadata (same body as above).
+Roles: `MAIN_ADMIN`. Edits school details (same body as above). Allowed when
+`REJECTED` (to fix and resubmit) or `APPROVED`; returns `409` while `PENDING`
+so the Super Admin reviews exactly what was submitted. Audited as
+`school_details_updated`.
 
 ### `POST /schools/resubmit`
 
 Roles: `MAIN_ADMIN`. Moves a `REJECTED` school back to `PENDING` and clears the
-rejection reason so it can be reviewed again.
+rejection reason so it can be reviewed again. Audited as `school_resubmitted`
+(with the previous reason) and notifies all Super Admins in-app and by email.
 
 ---
 
@@ -215,10 +244,27 @@ rejection reason so it can be reviewed again.
 
 All routes require role `SUPER_ADMIN`, enforced server-side.
 
+### `GET /super-admin/overview`
+
+Real platform counts for the Super Admin dashboard:
+
+```json
+{
+  "schools": { "pending": 4, "approved": 2, "rejected": 0, "onboardingInProgress": 2, "newThisWeek": 8 },
+  "activeStudents": 0,
+  "schoolAdmins": 8
+}
+```
+
+`pending` counts only schools that submitted their details;
+`onboardingInProgress` are registrations that haven't yet.
+
 ### `GET /super-admin/schools?approvalStatus=PENDING`
 
-Lists schools with school info, Main Admin contact, location, transportation
-snapshot, onboarding completion and registration date.
+Lists schools with school info, Main Admin contact, location, transport
+estimates (flat fields), onboarding completion and registration date. With
+`approvalStatus=PENDING` only schools that **finished onboarding** are
+returned — unsubmitted registrations aren't reviewable.
 
 ### `GET /super-admin/schools/:id`
 
@@ -227,7 +273,8 @@ Full detail for one school including all memberships.
 ### `POST /super-admin/schools/:id/approve`
 
 `PENDING → APPROVED`. Records `approvedAt` / `approvedBy`, audits
-`school_approved`, and emails the Main Admin.
+`school_approved`, and emails the Main Admin. Approve and reject both return
+`400` if the school hasn't finished onboarding.
 
 ### `POST /super-admin/schools/:id/reject`
 
@@ -245,7 +292,8 @@ A school may have exactly 1 Main Admin and at most 5 Managers.
 
 ### `POST /schools/administrators/invitations`
 
-Roles: `MAIN_ADMIN` only (Managers get `403`). Enforces
+Roles: `MAIN_ADMIN` only (Managers get `403`). Requires an **`APPROVED`**
+school (`403` otherwise — adding managers is an operational action). Enforces
 `count(active managers + pending invitations) < 5` server-side inside a locked
 transaction; returns `409` at the limit. Emails a single-use, time-expiring
 invitation link.

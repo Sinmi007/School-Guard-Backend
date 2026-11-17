@@ -1,6 +1,7 @@
 import { Body, Controller, Delete, Get, Param, Post } from '@nestjs/common';
 import { UserRole } from '@prisma/client';
 import { CurrentUser } from '../../common/auth/current-user.decorator';
+import { RequireApprovedSchool } from '../../common/auth/require-approved-school.decorator';
 import { Roles } from '../../common/auth/roles.decorator';
 import type { AuthTokenPayload } from '../../common/auth/token.service';
 import { AdministratorsService } from './administrators.service';
@@ -12,6 +13,8 @@ import { TransferMainAdminDto } from './dto/transfer-main-admin.dto';
 export class AdministratorsController {
   constructor(private readonly administratorsService: AdministratorsService) {}
 
+  /** Adding managers is an operational action: blocked until the school is APPROVED (PRD M2 §7). */
+  @RequireApprovedSchool()
   @Post('invitations')
   invite(@CurrentUser() user: AuthTokenPayload, @Body() dto: InviteManagerDto) {
     return this.administratorsService.inviteManager(user, dto);

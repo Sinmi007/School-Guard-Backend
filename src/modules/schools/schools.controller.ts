@@ -17,6 +17,13 @@ export class SchoolsController {
     return this.schoolsService.getMine(user);
   }
 
+  /** Dashboard counts (students, managers). Viewable at any approval status. */
+  @Roles(UserRole.MAIN_ADMIN, UserRole.MANAGER)
+  @Get('me/overview')
+  getOverview(@CurrentUser() user: AuthTokenPayload) {
+    return this.schoolsService.getOverview(user);
+  }
+
   @Roles(UserRole.MAIN_ADMIN)
   @Post('onboarding')
   completeOnboarding(
@@ -26,6 +33,7 @@ export class SchoolsController {
     return this.schoolsService.completeOnboarding(user, dto);
   }
 
+  /** Edit details: allowed when REJECTED or APPROVED, read-only while PENDING. */
   @Roles(UserRole.MAIN_ADMIN)
   @Patch('me')
   updateMine(

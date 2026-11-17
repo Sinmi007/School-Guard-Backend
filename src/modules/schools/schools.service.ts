@@ -1,20 +1,28 @@
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
 import {
   ApprovalStatus,
+  InvitationStatus,
+  MembershipStatus,
   OnboardingStatus,
   Prisma,
+  StudentStatus,
   UserRole,
 } from '@prisma/client';
 import { AuthTokenPayload } from '../../common/auth/token.service';
 import { AuthorizationService } from '../../common/authorization/authorization.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditAction, AuditService } from '../audit/audit.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import { OnboardingDto } from './dto/onboarding.dto';
+import { withTransportFields } from './school-view';
+
+export const MAX_MANAGERS = 5;
 
 @Injectable()
 export class SchoolsService {
@@ -22,6 +30,7 @@ export class SchoolsService {
     private readonly prisma: PrismaService,
     private readonly authz: AuthorizationService,
     private readonly audit: AuditService,
+    private readonly notifications: NotificationsService,
   ) {}
 
   private requireSchool(user: AuthTokenPayload): string {
@@ -60,12 +69,85 @@ export class SchoolsService {
     }
 
     const { memberships, ...rest } = school;
-    return { ...rest, mainAdmin: memberships[0]?.user ?? null };
+    return withTransportFields({
+      ...rest,
+      mainAdmin: memberships[0]?.user ?? null,
+    });
+  }
+
+  /**
+   * Read-only counts for the school dashboard. Available at every approval
+   * status (a pending school simply sees zeros) and to Managers, who cannot
+   * call the MAIN_ADMIN-only administrators endpoints.
+   */
+  async getOverview(user: AuthTokenPayload) {
+    const schoolId = this.requireSchool(user);
+    await this.authz.assertSchoolAccess(user, schoolId);
+
+    const [
+      totalStudents,
+      activeStudents,
+      activeWithoutTransport,
+      managers,
+      pendingInvitations,
+    ] = await Promise.all([
+      this.prisma.student.count({ where: { schoolId } }),
+      this.prisma.student.count({
+        where: { schoolId, status: StudentStatus.ACTIVE },
+      }),
+      this.prisma.student.count({
+        where: {
+          schoolId,
+          status: StudentStatus.ACTIVE,
+          transportAssignment: { is: null },
+        },
+      }),
+      this.prisma.schoolMembership.count({
+        where: {
+          schoolId,
+          role: UserRole.MANAGER,
+          status: MembershipStatus.ACTIVE,
+        },
+      }),
+      this.prisma.managerInvitation.count({
+        where: {
+          schoolId,
+          status: InvitationStatus.PENDING,
+          expiresAt: { gt: new Date() },
+        },
+      }),
+    ]);
+
+    return {
+      students: {
+        total: totalStudents,
+        active: activeStudents,
+        activeWithoutTransport,
+      },
+      administrators: {
+        managers,
+        pendingInvitations,
+        maxManagers: MAX_MANAGERS,
+      },
+    };
   }
 
   async completeOnboarding(user: AuthTokenPayload, dto: OnboardingDto) {
     const schoolId = this.requireSchool(user);
     await this.authz.assertSchoolAccess(user, schoolId);
+
+    const current = await this.prisma.school.findUnique({
+      where: { id: schoolId },
+      select: { onboardingStatus: true },
+    });
+    if (!current) throw new NotFoundException('School not found');
+    if (current.onboardingStatus === OnboardingStatus.COMPLETED) {
+      // Further changes go through PATCH /schools/me, which applies the
+      // approval-status rules (e.g. read-only while under review).
+      throw new ConflictException(
+        'Onboarding is already complete. Update your school details from the School Profile page.',
+      );
+    }
 
     const school = await this.prisma.school.update({
       where: { id: schoolId },
@@ -84,17 +166,50 @@ export class SchoolsService {
       targetId: schoolId,
     });
 
-    return { school, redirectTo: '/school/dashboard' };
+    return {
+      school: withTransportFields(school),
+      redirectTo: '/school/dashboard',
+    };
   }
 
+  /**
+   * Edit school details. Allowed when REJECTED (to fix and resubmit) and when
+   * APPROVED; read-only while PENDING so the Super Admin reviews exactly what
+   * was submitted (PRD M2 §6: "read-only onboarding info").
+   */
   async updateMine(user: AuthTokenPayload, dto: OnboardingDto) {
     const schoolId = this.requireSchool(user);
     await this.authz.assertSchoolAccess(user, schoolId);
 
-    return this.prisma.school.update({
+    const current = await this.prisma.school.findUnique({
+      where: { id: schoolId },
+      select: { approvalStatus: true, onboardingStatus: true },
+    });
+    if (!current) throw new NotFoundException('School not found');
+    if (
+      current.approvalStatus === ApprovalStatus.PENDING &&
+      current.onboardingStatus === OnboardingStatus.COMPLETED
+    ) {
+      throw new ConflictException(
+        'Your school details are under review and cannot be changed until a decision is made.',
+      );
+    }
+
+    const school = await this.prisma.school.update({
       where: { id: schoolId },
       data: this.toData(dto),
     });
+
+    await this.audit.log({
+      actorId: user.sub,
+      schoolId,
+      action: AuditAction.SchoolDetailsUpdated,
+      targetType: 'School',
+      targetId: schoolId,
+      metadata: { fields: Object.keys(dto) },
+    });
+
+    return withTransportFields(school);
   }
 
   async resubmit(user: AuthTokenPayload) {
@@ -103,7 +218,7 @@ export class SchoolsService {
 
     const school = await this.prisma.school.findUnique({
       where: { id: schoolId },
-      select: { approvalStatus: true },
+      select: { approvalStatus: true, rejectionReason: true },
     });
 
     if (!school) {
@@ -126,7 +241,24 @@ export class SchoolsService {
       },
     });
 
-    return updated;
+    await this.audit.log({
+      actorId: user.sub,
+      schoolId,
+      action: AuditAction.SchoolResubmitted,
+      targetType: 'School',
+      targetId: schoolId,
+      metadata: {
+        from: ApprovalStatus.REJECTED,
+        to: ApprovalStatus.PENDING,
+        previousRejectionReason: school.rejectionReason,
+      },
+    });
+    await this.notifications.notifySuperAdminsOfResubmission({
+      id: updated.id,
+      name: updated.name,
+    });
+
+    return withTransportFields(updated);
   }
 
   private toData(dto: OnboardingDto): Prisma.SchoolUpdateInput {
