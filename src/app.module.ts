@@ -19,7 +19,7 @@ import { SchoolsModule } from './modules/schools/schools.module';
 import { SuperAdminModule } from './modules/super-admin/super-admin.module';
 import { AdministratorsModule } from './modules/administrators/administrators.module';
 import { StudentsModule } from './modules/students/students.module';
-
+import { DriversModule } from './modules/drivers/drivers.module';
 
 @Module({
   imports: [
@@ -47,7 +47,7 @@ import { StudentsModule } from './modules/students/students.module';
     SuperAdminModule,
     AdministratorsModule,
     StudentsModule,
-
+    DriversModule,
   ],
   controllers: [AppController],
   providers: [

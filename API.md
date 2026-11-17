@@ -23,7 +23,8 @@ operational features unlock.
 9. [Notifications](#notifications)
 10. [Audit Logs](#audit-logs)
 11. [Students](#students)
-12. [Error Codes](#error-codes)
+12. [Drivers](#drivers)
+13. [Error Codes](#error-codes)
 
 ---
 
@@ -194,9 +195,13 @@ Roles: `MAIN_ADMIN`, `MANAGER`. Dashboard counts, available at any status
 ```json
 {
   "students": { "total": 0, "active": 0, "activeWithoutTransport": 0 },
-  "administrators": { "managers": 0, "pendingInvitations": 0, "maxManagers": 5 }
+  "administrators": { "managers": 0, "pendingInvitations": 0, "maxManagers": 5 },
+  "drivers": { "total": 0, "active": 0, "invited": 0, "licenseWarnings": 0 }
 }
 ```
+
+`licenseWarnings` = active/invited drivers whose licence has expired or expires
+within 30 days.
 
 ### `POST /schools/onboarding`
 
@@ -361,7 +366,8 @@ Logged events include: `school_registered`, `onboarding_completed`,
 `main_admin_transferred`, `student_created`, `student_updated`,
 `student_status_changed`, `student_import_started` (file uploaded),
 `student_import_completed` (rows committed on confirm), `student_import_failed`
-(file rejected).
+(file rejected), `driver_created`, `driver_invitation_resent`, `driver_accepted`,
+`driver_updated`, `driver_status_changed` (metadata: `from`, `to`, `reason?`).
 
 ---
 
@@ -429,6 +435,107 @@ A second confirm returns `409`.
 `committedStudentId`).
 
 Import status: `PROCESSING` → `COMPLETED` (preview ready) → `CONFIRMED`, or `FAILED`.
+
+---
+
+## Drivers
+
+Milestone 4. School endpoints need `MAIN_ADMIN` or `MANAGER` **and an approved
+school** (403 otherwise). Every query is scoped to the caller's school; another
+school's driver id returns `404`.
+
+**Lifecycle:** `INVITED` (record created, invitation emailed) → `ACTIVE` (driver
+accepted and set a password) ⇄ `SUSPENDED`, and `ACTIVE`/`SUSPENDED` → `INACTIVE`
+(left the school) → `ACTIVE`. An admin can never set `ACTIVE` on a driver who
+hasn't accepted. Suspending/deactivating updates the driver's membership, so the
+driver is locked out on their very next request.
+
+**Driver object** (all school endpoints):
+
+```json
+{
+  "id": "uuid", "driverId": "DRV-000001", "status": "INVITED",
+  "firstName": "Musa", "lastName": "Bello",
+  "email": "musa@example.com", "phone": "08031234567",
+  "dateOfBirth": "1985-03-02", "gender": "MALE", "address": "…",
+  "licenseNumber": "LAG12345AA1", "licenseClass": "E",
+  "licenseExpiry": "2027-06-05", "licenseIssuingState": "Lagos",
+  "yearsOfExperience": 8,
+  "emergencyContactName": "Aisha Bello", "emergencyContactPhone": "08039876543",
+  "licenseState": "VALID",
+  "hasAccount": false,
+  "activatedAt": null, "createdAt": "…", "updatedAt": "…"
+}
+```
+
+- `driverId` is generated per school (`DRV-000001`, …) and never changes.
+- `licenseNumber` is stored upper-case without spaces; unique per school.
+- `email` is the driver's login; unique per school and must not already belong
+  to any Àjò account. It can be edited until the driver has set up their account.
+- `licenseState`: `EXPIRED`, `EXPIRING_SOON` (within 30 days) or `VALID`. An expired
+  licence is accepted (so schools can record drivers mid-renewal) and flagged.
+- Dates are `YYYY-MM-DD`.
+
+### `POST /drivers`
+
+Body: `firstName`, `lastName`, `email`, `phone`, `licenseNumber`,
+`licenseExpiry` (required); `dateOfBirth`, `gender`, `address`, `licenseClass`,
+`licenseIssuingState`, `yearsOfExperience` (0–60), `emergencyContactName`,
+`emergencyContactPhone` (optional). Creates the driver as `INVITED` and emails a
+single-use invitation link (`{APP_BASE_URL}/driver-invitations/{token}`, valid
+`INVITATION_TTL_HOURS`, default 7 days). Returns the driver detail (below).
+`409` on duplicate licence/email or an email that already has an account.
+
+### `GET /drivers?search=&status=&license=&page=&limit=`
+
+`search` matches name, driverId, email, phone and licence number (every word
+must match). `status`: a driver status. `license`: `EXPIRED` | `EXPIRING_SOON` |
+`VALID`. Returns `{ data: Driver[], meta: { total, page, limit, totalPages } }`.
+
+### `GET /drivers/summary`
+
+`{ total, byStatus: { INVITED, ACTIVE, SUSPENDED, INACTIVE }, licenseExpired,
+licenseExpiringSoon }` (licence counts only include active/invited drivers).
+
+### `GET /drivers/:id`
+
+Driver plus `createdByName` and `invitation` (latest: `status`, `email`,
+`expiresAt`, `createdAt`, `acceptedAt`; a pending invitation past its expiry is
+reported as `EXPIRED`). Never includes the token.
+
+### `PATCH /drivers/:id`
+
+Any create field. Send `null` to clear an optional field. Changing `email` after
+the driver has an account → `400`. Audited as `driver_updated` with the changed
+field names.
+
+### `PATCH /drivers/:id/status`
+
+Body: `{ "status": "ACTIVE" | "SUSPENDED" | "INACTIVE", "reason?": "…" }`.
+`INACTIVE` on an `INVITED` driver cancels the invitation (the link stops
+working). Disallowed transitions → `400`.
+
+### `POST /drivers/:id/resend-invitation`
+
+Revokes the pending link and emails a new one. Works for `INVITED` drivers and
+re-opens a cancelled invitation (`INACTIVE` without an account → `INVITED`).
+`400` once the driver has set up their account.
+
+### `GET /driver-invitations/:token`
+
+Public. `{ email, firstName, lastName, driverId, schoolName, expiresAt }` for the
+accept screen. `404` unknown/used/revoked, `410` expired.
+
+### `POST /driver-invitations/accept`
+
+Public. Body: `{ "token", "password" }` (8–128 chars). Creates the `DRIVER` user
+and membership, sets the driver `ACTIVE`, notifies the inviter in-app. Single-use
+(second attempt → `404`). The driver then signs in with `POST /auth/login`.
+
+### `GET /driver-portal/me`
+
+Role `DRIVER`. The signed-in driver's own record plus `schoolName`. `403` while
+suspended/inactive.
 
 ---
 

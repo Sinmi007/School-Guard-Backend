@@ -134,12 +134,41 @@ export class NotificationsService {
     school: SchoolRef,
     rawToken: string,
   ): Promise<void> {
-    const acceptUrl = `${this.appBaseUrl}/admin-invitations/accept?token=${rawToken}`;
+    // Matches the frontend route /admin-invitations/[token].
+    const acceptUrl = `${this.appBaseUrl}/admin-invitations/${encodeURIComponent(rawToken)}`;
     await this.email.sendMail({
       to: invitation.email,
       subject: `You've been invited to manage ${school.name}`,
       html: `<p>Hi ${invitation.firstName},</p><p>You have been invited to manage <strong>${school.name}</strong> on SchoolGuard.</p><p><a href="${acceptUrl}">Accept your invitation</a></p><p>This link expires and can only be used once.</p>`,
     });
+  }
+
+  async notifyDriverInvited(
+    driver: { firstName: string; email: string },
+    school: SchoolRef,
+    rawToken: string,
+  ): Promise<void> {
+    // Matches the frontend route /driver-invitations/[token].
+    const acceptUrl = `${this.appBaseUrl}/driver-invitations/${encodeURIComponent(rawToken)}`;
+    await this.email.sendMail({
+      to: driver.email,
+      subject: `${school.name} has added you as a driver on Àjò`,
+      html: `<p>Hi ${driver.firstName},</p><p><strong>${school.name}</strong> has added you as a driver on Àjò SchoolGuard.</p><p><a href="${acceptUrl}">Set up your driver account</a></p><p>This link can only be used once and expires in 7 days.</p>`,
+    });
+  }
+
+  async notifyDriverAccepted(
+    inviterId: string,
+    school: SchoolRef,
+    driverName: string,
+  ): Promise<void> {
+    await this.createInApp(
+      inviterId,
+      school.id,
+      NotificationType.DRIVER_ACCEPTED,
+      'Driver account set up',
+      `${driverName} accepted their invitation and can now use the Driver Portal.`,
+    );
   }
 
   async notifyMainAdminTransferred(

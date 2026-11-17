@@ -60,6 +60,16 @@ enum NotificationType {
   MANAGER_INVITED
   MANAGER_ACCEPTED
   MAIN_ADMIN_TRANSFERRED
+  DRIVER_ACCEPTED
+}
+
+/// Driver lifecycle (PRD M4). INVITED until the driver accepts their
+/// invitation; ACTIVE drivers can sign in to the Driver Portal.
+enum DriverStatus {
+  INVITED
+  ACTIVE
+  SUSPENDED
+  INACTIVE
 }
 
 enum Gender {
@@ -127,6 +137,9 @@ model User {
   managerInvitationsMade   ManagerInvitation[] @relation("ManagerInviter")
   managerInvitationsAccepted ManagerInvitation[] @relation("ManagerAccepted")
   studentImports           StudentImport[]
+  driverProfile            Driver?            @relation("DriverUser")
+  driversCreated           Driver[]           @relation("DriverCreator")
+  driverInvitationsMade    DriverInvitation[] @relation("DriverInviter")
 
   @@map("users")
 }
@@ -170,6 +183,8 @@ model School {
   // Last allocated number for generated studentIds (AJO-000001, ...).
   // Incremented atomically — never derive IDs from a row count.
   studentIdSeq Int @default(0) @map("student_id_seq")
+  // Same scheme for driverIds (DRV-000001, ...).
+  driverIdSeq  Int @default(0) @map("driver_id_seq")
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
@@ -182,6 +197,8 @@ model School {
   students           Student[]
   studentImports     StudentImport[]
   studentTransportAssignments StudentTransportAssignment[]
+  drivers                     Driver[]
+  driverInvitations           DriverInvitation[]
 
   @@index([approvalStatus])
   @@map("schools")
@@ -224,6 +241,82 @@ model ManagerInvitation {
   @@index([schoolId, status])
   @@index([email])
   @@map("manager_invitations")
+}
+
+// ---------------------------------------------------------------------------
+// Drivers (PRD M4)
+// ---------------------------------------------------------------------------
+
+/// A driver employed by a school. Created by a Main Admin/Manager; the linked
+/// User account (role DRIVER) only exists once the invitation is accepted.
+model Driver {
+  id       String @id @default(uuid())
+  // School-scoped, human-readable identifier (e.g. DRV-000012).
+  driverId String @map("driver_id")
+  schoolId String @map("school_id")
+  school   School @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+
+  // Set when the invitation is accepted.
+  userId String? @unique @map("user_id")
+  user   User?   @relation("DriverUser", fields: [userId], references: [id], onDelete: SetNull)
+
+  firstName   String    @map("first_name")
+  lastName    String    @map("last_name")
+  // Login email, lower-cased. Editable until the driver has an account.
+  email       String
+  phone       String
+  dateOfBirth DateTime? @map("date_of_birth") @db.Date
+  gender      Gender?
+  address     String?
+
+  // Licence / compliance
+  licenseNumber       String   @map("license_number")
+  licenseClass        String?  @map("license_class")
+  licenseExpiry       DateTime @map("license_expiry") @db.Date
+  licenseIssuingState String?  @map("license_issuing_state")
+  yearsOfExperience   Int?     @map("years_of_experience")
+
+  emergencyContactName  String? @map("emergency_contact_name")
+  emergencyContactPhone String? @map("emergency_contact_phone")
+
+  status DriverStatus @default(INVITED)
+
+  createdById String?   @map("created_by_id")
+  createdBy   User?     @relation("DriverCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  activatedAt DateTime? @map("activated_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  invitations DriverInvitation[]
+
+  @@unique([schoolId, driverId])
+  @@unique([schoolId, email])
+  @@unique([schoolId, licenseNumber])
+  @@index([schoolId, status])
+  @@index([schoolId, licenseExpiry])
+  @@map("drivers")
+}
+
+/// Single-use, time-limited invitation for a Driver to set up their account.
+/// Resending revokes the previous pending invitation.
+model DriverInvitation {
+  id          String           @id @default(uuid())
+  schoolId    String           @map("school_id")
+  school      School           @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  driverId    String           @map("driver_id")
+  driver      Driver           @relation(fields: [driverId], references: [id], onDelete: Cascade)
+  email       String
+  tokenHash   String           @unique @map("token_hash")
+  status      InvitationStatus @default(PENDING)
+  expiresAt   DateTime         @map("expires_at")
+  invitedById String?          @map("invited_by_id")
+  invitedBy   User?            @relation("DriverInviter", fields: [invitedById], references: [id], onDelete: SetNull)
+  createdAt   DateTime         @default(now()) @map("created_at")
+  acceptedAt  DateTime?        @map("accepted_at")
+
+  @@index([driverId, status])
+  @@index([schoolId, status])
+  @@map("driver_invitations")
 }
 
 // ---------------------------------------------------------------------------

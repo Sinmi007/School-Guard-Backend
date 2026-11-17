@@ -31,6 +31,12 @@ export const AuditAction = {
   StudentImportCompleted: 'student_import_completed',
   /** File rejected (bad structure, too many rows, parse error). */
   StudentImportFailed: 'student_import_failed',
+  // M4: Drivers
+  DriverCreated: 'driver_created',
+  DriverInvitationResent: 'driver_invitation_resent',
+  DriverAccepted: 'driver_accepted',
+  DriverUpdated: 'driver_updated',
+  DriverStatusChanged: 'driver_status_changed',
 } as const;
 
 @Injectable()

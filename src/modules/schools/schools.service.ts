@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import {
   ApprovalStatus,
+  DriverStatus,
   InvitationStatus,
   MembershipStatus,
   OnboardingStatus,
@@ -21,6 +22,7 @@ import { AuditAction, AuditService } from '../audit/audit.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { OnboardingDto } from './dto/onboarding.dto';
 import { withTransportFields } from './school-view';
+import { LICENSE_WARNING_DAYS } from '../drivers/drivers.service';
 
 export const MAX_MANAGERS = 5;
 
@@ -90,6 +92,8 @@ export class SchoolsService {
       activeWithoutTransport,
       managers,
       pendingInvitations,
+      driversByStatus,
+      driverLicenseWarnings,
     ] = await Promise.all([
       this.prisma.student.count({ where: { schoolId } }),
       this.prisma.student.count({
@@ -116,7 +120,25 @@ export class SchoolsService {
           expiresAt: { gt: new Date() },
         },
       }),
+      this.prisma.driver.groupBy({
+        by: ['status'],
+        where: { schoolId },
+        _count: { _all: true },
+      }),
+      // Active/invited drivers whose licence is expired or expires soon.
+      this.prisma.driver.count({
+        where: {
+          schoolId,
+          status: { in: [DriverStatus.ACTIVE, DriverStatus.INVITED] },
+          licenseExpiry: {
+            lte: new Date(Date.now() + LICENSE_WARNING_DAYS * 86_400_000),
+          },
+        },
+      }),
     ]);
+
+    const driverCount = (s: DriverStatus) =>
+      driversByStatus.find((r) => r.status === s)?._count._all ?? 0;
 
     return {
       students: {
@@ -128,6 +150,12 @@ export class SchoolsService {
         managers,
         pendingInvitations,
         maxManagers: MAX_MANAGERS,
+      },
+      drivers: {
+        total: driversByStatus.reduce((n, r) => n + r._count._all, 0),
+        active: driverCount(DriverStatus.ACTIVE),
+        invited: driverCount(DriverStatus.INVITED),
+        licenseWarnings: driverLicenseWarnings,
       },
     };
   }
