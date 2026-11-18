@@ -20,6 +20,7 @@ import { SuperAdminModule } from './modules/super-admin/super-admin.module';
 import { AdministratorsModule } from './modules/administrators/administrators.module';
 import { StudentsModule } from './modules/students/students.module';
 import { DriversModule } from './modules/drivers/drivers.module';
+import { TransportModule } from './modules/transport/transport.module';
 
 @Module({
   imports: [
@@ -48,6 +49,7 @@ import { DriversModule } from './modules/drivers/drivers.module';
     AdministratorsModule,
     StudentsModule,
     DriversModule,
+    TransportModule,
   ],
   controllers: [AppController],
   providers: [

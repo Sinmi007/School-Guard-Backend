@@ -7,11 +7,13 @@ import {
 } from '@nestjs/common';
 import {
   ApprovalStatus,
+  BusStatus,
   DriverStatus,
   InvitationStatus,
   MembershipStatus,
   OnboardingStatus,
   Prisma,
+  RouteStatus,
   StudentStatus,
   UserRole,
 } from '@prisma/client';
@@ -94,6 +96,9 @@ export class SchoolsService {
       pendingInvitations,
       driversByStatus,
       driverLicenseWarnings,
+      busesByStatus,
+      routesByStatus,
+      studentsOnRoutes,
     ] = await Promise.all([
       this.prisma.student.count({ where: { schoolId } }),
       this.prisma.student.count({
@@ -135,7 +140,26 @@ export class SchoolsService {
           },
         },
       }),
+      this.prisma.bus.groupBy({
+        by: ['status'],
+        where: { schoolId },
+        _count: { _all: true },
+      }),
+      this.prisma.route.groupBy({
+        by: ['status'],
+        where: { schoolId },
+        _count: { _all: true },
+      }),
+      this.prisma.studentTransportAssignment.count({
+        where: { schoolId, routeId: { not: null } },
+      }),
     ]);
+    const countOf = <T extends string>(
+      rows: { status: T; _count: { _all: number } }[],
+      s: T,
+    ) => rows.find((r) => r.status === s)?._count._all ?? 0;
+    const sum = (rows: { _count: { _all: number } }[]) =>
+      rows.reduce((n, r) => n + r._count._all, 0);
 
     const driverCount = (s: DriverStatus) =>
       driversByStatus.find((r) => r.status === s)?._count._all ?? 0;
@@ -156,6 +180,16 @@ export class SchoolsService {
         active: driverCount(DriverStatus.ACTIVE),
         invited: driverCount(DriverStatus.INVITED),
         licenseWarnings: driverLicenseWarnings,
+      },
+      buses: {
+        total: sum(busesByStatus),
+        active: countOf(busesByStatus, BusStatus.ACTIVE),
+        maintenance: countOf(busesByStatus, BusStatus.MAINTENANCE),
+      },
+      routes: {
+        total: sum(routesByStatus),
+        active: countOf(routesByStatus, RouteStatus.ACTIVE),
+        studentsAssigned: studentsOnRoutes,
       },
     };
   }

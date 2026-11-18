@@ -82,6 +82,10 @@ function build() {
       updateMany: jest.fn().mockResolvedValue({ count: 1 }),
     },
     schoolMembership: { create: jest.fn(), updateMany: jest.fn() },
+    bus: {
+      findUnique: jest.fn().mockResolvedValue(null),
+      update: jest.fn(),
+    },
   };
   const prisma = {
     $transaction: jest.fn((fn: (c: unknown) => unknown) => fn(tx)),

@@ -12,6 +12,7 @@ import {
   InvitationStatus,
   MembershipStatus,
   Prisma,
+  RouteStatus,
   UserRole,
 } from '@prisma/client';
 import type { Driver, DriverInvitation } from '@prisma/client';
@@ -29,6 +30,8 @@ import { ListDriversQueryDto } from './dto/list-drivers-query.dto';
 import { UpdateDriverDto } from './dto/update-driver.dto';
 
 type Tx = Prisma.TransactionClient;
+
+const BUS_REF = { id: true, code: true, plateNumber: true } as const;
 
 const TRANSACTION_OPTIONS = { maxWait: 10_000, timeout: 20_000 } as const;
 
@@ -179,8 +182,7 @@ export class DriversService {
   async resendInvitation(actor: AuthTokenPayload, id: string) {
     const schoolId = this.requireSchool(actor);
     const driver = await this.getOwned(schoolId, id);
-    const reopening =
-      driver.status === DriverStatus.INACTIVE && !driver.userId;
+    const reopening = driver.status === DriverStatus.INACTIVE && !driver.userId;
     if (driver.status !== DriverStatus.INVITED && !reopening) {
       throw new BadRequestException(
         'Only drivers who have not set up their account can be re-invited',
@@ -294,6 +296,7 @@ export class DriversService {
         skip: (page - 1) * limit,
         take: limit,
         orderBy: { createdAt: 'desc' },
+        include: { bus: { select: BUS_REF } },
       }),
       this.prisma.driver.count({ where }),
     ]);
@@ -311,6 +314,7 @@ export class DriversService {
       include: {
         invitations: { orderBy: { createdAt: 'desc' }, take: 1 },
         createdBy: { select: { firstName: true, lastName: true } },
+        bus: { select: BUS_REF },
       },
     });
     if (!driver) throw new NotFoundException('Driver not found');
@@ -471,8 +475,21 @@ export class DriversService {
       );
     }
 
-    await this.prisma.$transaction(async (tx) => {
+    const removedFromBus = await this.prisma.$transaction(async (tx) => {
       await tx.driver.update({ where: { id }, data: { status: to } });
+      // A driver who has left no longer drives a bus (M5).
+      let bus: { id: string; code: string } | null = null;
+      if (to === DriverStatus.INACTIVE) {
+        bus = await tx.bus.findUnique({
+          where: { driverId: id },
+          select: { id: true, code: true },
+        });
+        if (bus)
+          await tx.bus.update({
+            where: { id: bus.id },
+            data: { driverId: null },
+          });
+      }
       if (from === DriverStatus.INVITED) {
         // Cancelling: the outstanding link must stop working.
         await tx.driverInvitation.updateMany({
@@ -488,7 +505,23 @@ export class DriversService {
           data: { status: MEMBERSHIP_FOR[to] },
         });
       }
+      return bus;
     }, TRANSACTION_OPTIONS);
+
+    if (removedFromBus) {
+      await this.audit.log({
+        actorId: actor.sub,
+        schoolId,
+        action: AuditAction.DriverRemovedFromBus,
+        targetType: 'Bus',
+        targetId: removedFromBus.id,
+        metadata: {
+          driverId: driver.driverId,
+          bus: removedFromBus.code,
+          reason: 'driver deactivated',
+        },
+      });
+    }
 
     await this.audit.log({
       actorId: actor.sub,
@@ -641,16 +674,86 @@ export class DriversService {
   // Driver Portal
   // ---------------------------------------------------------------------------
 
+  /**
+   * The signed-in driver's profile plus their bus, its active routes, stops
+   * in order, and the students picked up at each stop.
+   */
   async me(actor: AuthTokenPayload) {
     const driver = await this.prisma.driver.findUnique({
       where: { userId: actor.sub },
-      include: { school: { select: { name: true } } },
+      include: {
+        school: { select: { name: true } },
+        bus: {
+          select: {
+            ...BUS_REF,
+            capacity: true,
+            make: true,
+            vehicleModel: true,
+            color: true,
+            status: true,
+            routes: {
+              where: { status: RouteStatus.ACTIVE },
+              orderBy: { name: 'asc' },
+              select: {
+                id: true,
+                name: true,
+                morningDeparture: true,
+                afternoonDeparture: true,
+                stops: { orderBy: { sequence: 'asc' } },
+                studentAssignments: {
+                  select: {
+                    pickupStopId: true,
+                    student: {
+                      select: {
+                        id: true,
+                        studentId: true,
+                        firstName: true,
+                        lastName: true,
+                        classGrade: true,
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
     });
     if (!driver || driver.schoolId !== actor.schoolId) {
       throw new NotFoundException('Driver profile not found');
     }
-    const { school, ...rest } = driver;
-    return { ...this.toView(rest), schoolName: school.name };
+    const { school, bus, ...rest } = driver;
+    const byName = (a: { lastName: string }, b: { lastName: string }) =>
+      a.lastName.localeCompare(b.lastName);
+    return {
+      ...this.toView(rest),
+      schoolName: school.name,
+      bus: bus && {
+        ...bus,
+        routes: bus.routes.map(({ stops, studentAssignments, ...r }) => ({
+          ...r,
+          studentCount: studentAssignments.length,
+          stops: stops.map((st) => ({
+            id: st.id,
+            sequence: st.sequence,
+            name: st.name,
+            landmark: st.landmark,
+            pickupTime: st.pickupTime,
+            dropoffTime: st.dropoffTime,
+            students: studentAssignments
+              .filter((a) => a.pickupStopId === st.id)
+              .map((a) => a.student)
+              .sort(byName),
+          })),
+          // On the route but no pickup stop chosen yet.
+          unplacedStudents: studentAssignments
+            .filter((a) => !a.pickupStopId)
+            .map((a) => a.student)
+            .sort(byName),
+        })),
+      },
+    };
   }
 
   // ---------------------------------------------------------------------------

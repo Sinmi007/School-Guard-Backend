@@ -13,6 +13,17 @@ import { ListStudentsQueryDto } from './dto/list-students-query.dto';
 import { UpdateStudentDto } from './dto/update-student.dto';
 import { allocateStudentIds } from './student-id.allocator';
 
+/** Route, pickup stop and bus names alongside the assignment (M5). */
+const TRANSPORT_INCLUDE = {
+  transportAssignment: {
+    include: {
+      route: { select: { id: true, name: true } },
+      pickupStop: { select: { id: true, name: true, pickupTime: true } },
+      bus: { select: { id: true, code: true, plateNumber: true } },
+    },
+  },
+} satisfies Prisma.StudentInclude;
+
 @Injectable()
 export class StudentsService {
   constructor(
@@ -114,7 +125,7 @@ export class StudentsService {
         skip,
         take: limit,
         orderBy: { createdAt: 'desc' },
-        include: { transportAssignment: true },
+        include: TRANSPORT_INCLUDE,
       }),
       this.prisma.student.count({ where }),
     ]);
@@ -129,7 +140,7 @@ export class StudentsService {
     const schoolId = this.requireSchool(user);
     const student = await this.prisma.student.findFirst({
       where: { id, schoolId },
-      include: { transportAssignment: true },
+      include: TRANSPORT_INCLUDE,
     });
     if (!student) throw new NotFoundException('Student not found');
     return student;
@@ -198,6 +209,10 @@ export class StudentsService {
       },
     });
 
+    if (statusChanged && dto.status !== StudentStatus.ACTIVE) {
+      await this.releaseTransport(user, id);
+    }
+
     if (statusChanged) {
       await this.audit.log({
         actorId: user.sub,
@@ -242,6 +257,7 @@ export class StudentsService {
       where: { id },
       data: { status: StudentStatus.TRANSFERRED_OUT },
     });
+    await this.releaseTransport(user, id);
 
     await this.audit.log({
       actorId: user.sub,
@@ -253,5 +269,28 @@ export class StudentsService {
     });
 
     return updated;
+  }
+
+  /** A student who is no longer ACTIVE gives up their seat on the bus. */
+  private async releaseTransport(user: AuthTokenPayload, id: string) {
+    const assignment = await this.prisma.studentTransportAssignment.findUnique({
+      where: { studentId: id },
+      include: { route: { select: { name: true } } },
+    });
+    if (!assignment) return;
+    await this.prisma.studentTransportAssignment.delete({
+      where: { id: assignment.id },
+    });
+    await this.audit.log({
+      actorId: user.sub,
+      schoolId: assignment.schoolId,
+      action: AuditAction.StudentTransportRemoved,
+      targetType: 'Student',
+      targetId: id,
+      metadata: {
+        route: assignment.route?.name ?? null,
+        reason: 'student no longer active',
+      },
+    });
   }
 }

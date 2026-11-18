@@ -37,6 +37,19 @@ export const AuditAction = {
   DriverAccepted: 'driver_accepted',
   DriverUpdated: 'driver_updated',
   DriverStatusChanged: 'driver_status_changed',
+  // M5: Buses & Routes
+  BusCreated: 'bus_created',
+  BusUpdated: 'bus_updated',
+  BusDriverChanged: 'bus_driver_changed',
+  RouteCreated: 'route_created',
+  RouteUpdated: 'route_updated',
+  RouteStopsUpdated: 'route_stops_updated',
+  StudentsAssignedToRoute: 'students_assigned_to_route',
+  StudentUnassignedFromRoute: 'student_unassigned_from_route',
+  /** Assignment removed automatically (student left / became inactive). */
+  StudentTransportRemoved: 'student_transport_removed',
+  /** Driver taken off their bus automatically when deactivated. */
+  DriverRemovedFromBus: 'driver_removed_from_bus',
 } as const;
 
 @Injectable()

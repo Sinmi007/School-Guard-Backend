@@ -24,7 +24,8 @@ operational features unlock.
 10. [Audit Logs](#audit-logs)
 11. [Students](#students)
 12. [Drivers](#drivers)
-13. [Error Codes](#error-codes)
+13. [Buses & Routes](#buses--routes)
+14. [Error Codes](#error-codes)
 
 ---
 
@@ -196,7 +197,9 @@ Roles: `MAIN_ADMIN`, `MANAGER`. Dashboard counts, available at any status
 {
   "students": { "total": 0, "active": 0, "activeWithoutTransport": 0 },
   "administrators": { "managers": 0, "pendingInvitations": 0, "maxManagers": 5 },
-  "drivers": { "total": 0, "active": 0, "invited": 0, "licenseWarnings": 0 }
+  "drivers": { "total": 0, "active": 0, "invited": 0, "licenseWarnings": 0 },
+  "buses": { "total": 0, "active": 0, "maintenance": 0 },
+  "routes": { "total": 0, "active": 0, "studentsAssigned": 0 }
 }
 ```
 
@@ -367,7 +370,11 @@ Logged events include: `school_registered`, `onboarding_completed`,
 `student_status_changed`, `student_import_started` (file uploaded),
 `student_import_completed` (rows committed on confirm), `student_import_failed`
 (file rejected), `driver_created`, `driver_invitation_resent`, `driver_accepted`,
-`driver_updated`, `driver_status_changed` (metadata: `from`, `to`, `reason?`).
+`driver_updated`, `driver_status_changed` (metadata: `from`, `to`, `reason?`),
+`bus_created`, `bus_updated`, `bus_driver_changed`, `route_created`, `route_updated`,
+`route_stops_updated`, `students_assigned_to_route`, `student_unassigned_from_route`,
+`student_transport_removed` (student no longer active) and `driver_removed_from_bus`
+(driver deactivated).
 
 ---
 
@@ -534,8 +541,95 @@ and membership, sets the driver `ACTIVE`, notifies the inviter in-app. Single-us
 
 ### `GET /driver-portal/me`
 
-Role `DRIVER`. The signed-in driver's own record plus `schoolName`. `403` while
-suspended/inactive.
+Role `DRIVER`. The signed-in driver's own record plus `schoolName` and `bus`
+(null when not assigned): `{ id, code, plateNumber, capacity, make, vehicleModel,
+color, status, routes: [{ id, name, morningDeparture, afternoonDeparture,
+studentCount, stops: [{ id, sequence, name, landmark, pickupTime, dropoffTime,
+students: [{ id, studentId, firstName, lastName, classGrade }] }],
+unplacedStudents: [...] }] }` — only `ACTIVE` routes. `403` while
+suspended/inactive. School-side driver responses also include `bus`
+(`{ id, code, plateNumber }` or null).
+
+---
+
+## Buses & Routes
+
+Milestone 5. All endpoints need `MAIN_ADMIN` or `MANAGER` **and an approved
+school**; everything is scoped to the caller's school (another school's ids →
+`404`/`400`).
+
+**Rules**
+
+- A bus has at most one driver and a driver drives at most one bus. Only
+  `ACTIVE` or `INVITED` drivers can be assigned.
+- A route has at most one bus; a bus may serve several routes (e.g. morning and
+  afternoon). Students ride the bus of their route.
+- A route can never hold more students than its bus has seats (`409`).
+- Deactivating a driver removes them from their bus. A student who stops being
+  `ACTIVE` (incl. transferred out) loses their route assignment.
+- Times are 24-hour `"HH:MM"`.
+
+### Buses
+
+`GET /buses?search=&status=` → `Bus[]` (ordered by code). `search` matches code,
+plate, make/model and driver name; `status`: `ACTIVE` | `MAINTENANCE` | `RETIRED`.
+
+```json
+{
+  "id": "uuid", "code": "AJO-03", "plateNumber": "LAG123AA", "capacity": 30,
+  "make": "Toyota", "vehicleModel": "Coaster", "year": 2019, "color": "Yellow",
+  "notes": null, "status": "ACTIVE", "driverId": "uuid",
+  "driver": { "id", "driverId", "firstName", "lastName", "phone", "status" },
+  "routes": [{ "id", "name", "status", "studentCount": 12 }],
+  "maxRouteLoad": 12
+}
+```
+
+`GET /buses/:id` → `Bus`.
+
+`POST /buses` — `code`, `plateNumber` (both stored upper-case without spaces,
+unique per school), `capacity` (1–100) required; `make`, `vehicleModel`, `year`,
+`color`, `notes`, `driverId` optional.
+
+`PATCH /buses/:id` — any of the above plus `status`; `driverId: null` removes
+the driver. Retiring requires the bus to be on no route (`409`) and removes its
+driver. Lowering `capacity` below a route's student count → `409`.
+
+### Routes
+
+`GET /routes?search=&status=` → summaries: route fields plus `bus` (with
+driver), `stopCount`, `firstStop`, `lastStop`, `studentCount`. `search`
+matches route name, stop names and bus code.
+
+`GET /routes/:id` → route plus `bus`, `stops` (ordered, each with
+`studentCount`), `students` (`id, studentId, firstName, lastName, classGrade,
+status, pickupStop`), `studentCount`, `seatsLeft` (null without a bus).
+
+`POST /routes` — `name` (unique per school, case-insensitive) required;
+`description`, `busId` (not retired), `morningDeparture`, `afternoonDeparture`,
+`stops` (initial ordered list) optional.
+
+`PATCH /routes/:id` — same fields plus `status` (`ACTIVE` | `INACTIVE`).
+Changing the bus moves every student on the route to it (`409` if they don't
+fit). Deactivating a route that still has students → `409`.
+
+`PUT /routes/:id/stops` — `{ "stops": [{ "id?", "name", "landmark?", "address?",
+"latitude?", "longitude?", "pickupTime?", "dropoffTime?" }] }`, the full ordered
+list (max 60). Stops sent with their `id` are kept (with their students), new
+ones are created, missing ones deleted — unless students are picked up there
+(`409`).
+
+`POST /routes/:id/students` — `{ "assignments": [{ "studentId", "pickupStopId?" }] }`
+(max 200). Adds students (or moves them from another route) and sets their
+pickup stop, which must be on this route. Only `ACTIVE` students; the route must
+be `ACTIVE`; capacity enforced. Sending a student already on the route just
+changes their stop.
+
+`DELETE /routes/:id/students/:studentId` — removes the student from the route.
+
+Student responses (`GET /students`, `GET /students/:id`) include
+`transportAssignment` with `route { id, name }`, `pickupStop { id, name,
+pickupTime }` and `bus { id, code, plateNumber }`.
 
 ---
 

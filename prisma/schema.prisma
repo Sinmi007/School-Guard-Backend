@@ -72,6 +72,19 @@ enum DriverStatus {
   INACTIVE
 }
 
+/// PRD M5. MAINTENANCE buses stay on their routes but are flagged; RETIRED
+/// buses must first be removed from every route.
+enum BusStatus {
+  ACTIVE
+  MAINTENANCE
+  RETIRED
+}
+
+enum RouteStatus {
+  ACTIVE
+  INACTIVE
+}
+
 enum Gender {
   MALE
   FEMALE
@@ -198,6 +211,7 @@ model School {
   studentImports     StudentImport[]
   studentTransportAssignments StudentTransportAssignment[]
   drivers                     Driver[]
+  routes                      Route[]
   driverInvitations           DriverInvitation[]
 
   @@index([approvalStatus])
@@ -288,6 +302,8 @@ model Driver {
   updatedAt   DateTime  @updatedAt @map("updated_at")
 
   invitations DriverInvitation[]
+  // The bus this driver is assigned to (M5); at most one.
+  bus         Bus?
 
   @@unique([schoolId, driverId])
   @@unique([schoolId, email])
@@ -363,24 +379,95 @@ model Notification {
 // phase; no endpoints are wired to them in the foundation phase.
 // ---------------------------------------------------------------------------
 
+/// A school bus (PRD M5).
 model Bus {
-  id          String    @id @default(uuid())
-  schoolId    String    @map("school_id")
-  school      School    @relation(fields: [schoolId], references: [id], onDelete: Cascade)
-  plateNumber String    @map("plate_number")
-  driverName  String    @map("driver_name")
-  authToken   String    @map("auth_token")
-  status      String    @default("OFFLINE")
-  lastLat     Float?    @map("last_lat")
-  lastLng     Float?    @map("last_lng")
-  updatedAt   DateTime? @map("updated_at")
+  id       String @id @default(uuid())
+  schoolId String @map("school_id")
+  school   School @relation(fields: [schoolId], references: [id], onDelete: Cascade)
 
+  // School's own fleet number, e.g. "AJO-03". Upper-case, unique per school.
+  code         String    @map("code")
+  // Upper-case without spaces, unique per school.
+  plateNumber  String    @map("plate_number")
+  capacity     Int
+  make         String?
+  vehicleModel String?   @map("vehicle_model")
+  year         Int?
+  color        String?
+  notes        String?
+  status       BusStatus @default(ACTIVE)
+
+  // One driver per bus, one bus per driver.
+  driverId String? @unique @map("driver_id")
+  driver   Driver? @relation(fields: [driverId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  routes             Route[]
   studentAssignments StudentTransportAssignment[]
-  telemetry  TelemetryLog[]
-  events     ManifestEvent[]
+  telemetry          TelemetryLog[]
+  events             ManifestEvent[]
 
-  @@index([schoolId])
+  @@unique([schoolId, code])
+  @@unique([schoolId, plateNumber])
+  @@index([schoolId, status])
   @@map("buses")
+}
+
+/// A named route served by (at most) one bus, with ordered stops (PRD M5).
+model Route {
+  id          String  @id @default(uuid())
+  schoolId    String  @map("school_id")
+  school      School  @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  name        String
+  description String?
+
+  busId String? @map("bus_id")
+  bus   Bus?    @relation(fields: [busId], references: [id], onDelete: SetNull)
+
+  // "HH:MM" (24h), when the bus leaves for the morning pickup / afternoon drop-off.
+  morningDeparture   String? @map("morning_departure")
+  afternoonDeparture String? @map("afternoon_departure")
+
+  status    RouteStatus @default(ACTIVE)
+  createdAt DateTime    @default(now()) @map("created_at")
+  updatedAt DateTime    @updatedAt @map("updated_at")
+
+  stops              RouteStop[]
+  studentAssignments StudentTransportAssignment[]
+
+  @@unique([schoolId, name])
+  @@index([schoolId, status])
+  @@index([busId])
+  @@map("routes")
+}
+
+model RouteStop {
+  id       String @id @default(uuid())
+  routeId  String @map("route_id")
+  route    Route  @relation(fields: [routeId], references: [id], onDelete: Cascade)
+  schoolId String @map("school_id")
+  // 1-based order along the route.
+  sequence Int
+
+  name        String
+  landmark    String?
+  address     String?
+  latitude    Float?
+  longitude   Float?
+  // "HH:MM" (24h)
+  pickupTime  String? @map("pickup_time")
+  dropoffTime String? @map("dropoff_time")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  pickupAssignments StudentTransportAssignment[]
+
+  @@index([routeId, sequence])
+  @@index([schoolId])
+  @@map("route_stops")
 }
 
 model Student {
@@ -432,13 +519,16 @@ model StudentTransportAssignment {
   school       School   @relation(fields: [schoolId], references: [id], onDelete: Cascade)
   busId        String?  @map("bus_id")
   bus          Bus?     @relation(fields: [busId], references: [id], onDelete: SetNull)
-  routeId      String?  @map("route_id")
-  pickupStopId String?  @map("pickup_stop_id")
+  routeId      String?    @map("route_id")
+  route        Route?     @relation(fields: [routeId], references: [id], onDelete: SetNull)
+  pickupStopId String?    @map("pickup_stop_id")
+  pickupStop   RouteStop? @relation(fields: [pickupStopId], references: [id], onDelete: SetNull)
   assignedAt   DateTime @default(now()) @map("assigned_at")
   updatedAt    DateTime @updatedAt @map("updated_at")
 
   @@index([schoolId])
   @@index([busId])
+  @@index([routeId])
   @@map("student_transport_assignments")
 }
 
