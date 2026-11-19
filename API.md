@@ -537,6 +537,14 @@ Revokes the pending link and emails a new one. Works for `INVITED` drivers and
 re-opens a cancelled invitation (`INACTIVE` without an account → `INVITED`).
 `400` once the driver has set up their account.
 
+### `POST /drivers/:id/invite-link`
+
+Same eligibility as resend, but **no email is sent**: returns `{ path:
+"/driver-invitations/<token>", expiresAt, driver }` for the admin to share
+themselves (copy / WhatsApp). The app prefixes its own address. Tokens are stored
+hashed, so this always issues a new link and revokes the previous one. Audited as
+`driver_invite_link_created`.
+
 ### `GET /driver-invitations/:token`
 
 Public. `{ email, firstName, lastName, driverId, schoolName, expiresAt }` for the

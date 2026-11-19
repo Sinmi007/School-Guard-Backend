@@ -73,6 +73,15 @@ export class DriversController {
     return this.drivers.changeStatus(user, id, dto);
   }
 
+  /** Fresh invite link for the admin to share (replaces the previous link). */
+  @Post(':id/invite-link')
+  inviteLink(
+    @CurrentUser() user: AuthTokenPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.drivers.createInviteLink(user, id);
+  }
+
   @Post(':id/resend-invitation')
   resend(
     @CurrentUser() user: AuthTokenPayload,

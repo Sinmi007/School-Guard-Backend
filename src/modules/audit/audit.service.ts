@@ -34,6 +34,8 @@ export const AuditAction = {
   // M4: Drivers
   DriverCreated: 'driver_created',
   DriverInvitationResent: 'driver_invitation_resent',
+  /** Admin generated a shareable invite link (no email sent). */
+  DriverInviteLinkCreated: 'driver_invite_link_created',
   DriverAccepted: 'driver_accepted',
   DriverUpdated: 'driver_updated',
   DriverStatusChanged: 'driver_status_changed',

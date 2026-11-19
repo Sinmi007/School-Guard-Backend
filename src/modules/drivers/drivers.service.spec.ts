@@ -252,6 +252,35 @@ describe('DriversService', () => {
     });
   });
 
+  describe('createInviteLink', () => {
+    it('issues a fresh link (revoking the old one) without sending email', async () => {
+      const { service, tx, notifications } = build();
+      const res = await service.createInviteLink(actor, 'd1');
+      expect(res.path).toBe('/driver-invitations/raw');
+      expect(res.expiresAt).toBeInstanceOf(Date);
+      expect(tx.driverInvitation.updateMany).toHaveBeenCalledWith({
+        where: { driverId: 'd1', status: InvitationStatus.PENDING },
+        data: { status: InvitationStatus.REVOKED },
+      });
+      expect(tx.driverInvitation.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({ tokenHash: 'hash', driverId: 'd1' }),
+      });
+      expect(notifications.notifyDriverInvited).not.toHaveBeenCalled();
+    });
+
+    it('refuses once the driver has set up their account', async () => {
+      const { service, prisma } = build();
+      prisma.driver.findFirst.mockResolvedValue({
+        ...baseDriver,
+        status: DriverStatus.ACTIVE,
+        userId: 'u1',
+      });
+      await expect(
+        service.createInviteLink(actor, 'd1'),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    });
+  });
+
   describe('acceptInvitation', () => {
     const invitation = {
       id: 'inv1',

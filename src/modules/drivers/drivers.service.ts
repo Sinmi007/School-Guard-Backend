@@ -180,6 +180,47 @@ export class DriversService {
    * cancelled invitation (INACTIVE, never accepted) by moving it back to INVITED.
    */
   async resendInvitation(actor: AuthTokenPayload, id: string) {
+    const { driver, schoolId, token } = await this.reissueInvitation(actor, id);
+    await this.audit.log({
+      actorId: actor.sub,
+      schoolId,
+      action: AuditAction.DriverInvitationResent,
+      targetType: 'Driver',
+      targetId: driver.id,
+      metadata: { driverId: driver.driverId, email: driver.email },
+    });
+    await this.sendInvite(driver, schoolId, token);
+    return this.findOne(actor, driver.id);
+  }
+
+  /**
+   * A fresh invitation link for the admin to share themselves (WhatsApp, SMS…)
+   * instead of email. Tokens are only stored hashed, so an old link can't be
+   * shown again: this replaces it. Only the path is returned; the app adds its
+   * own address, so links are right whatever APP_BASE_URL says.
+   */
+  async createInviteLink(actor: AuthTokenPayload, id: string) {
+    const { driver, schoolId, token, expiresAt } = await this.reissueInvitation(
+      actor,
+      id,
+    );
+    await this.audit.log({
+      actorId: actor.sub,
+      schoolId,
+      action: AuditAction.DriverInviteLinkCreated,
+      targetType: 'Driver',
+      targetId: driver.id,
+      metadata: { driverId: driver.driverId },
+    });
+    return {
+      path: `/driver-invitations/${encodeURIComponent(token)}`,
+      expiresAt,
+      driver: await this.findOne(actor, driver.id),
+    };
+  }
+
+  /** Revokes any pending invitation and creates a new one (shared by resend + link). */
+  private async reissueInvitation(actor: AuthTokenPayload, id: string) {
     const schoolId = this.requireSchool(actor);
     const driver = await this.getOwned(schoolId, id);
     const reopening = driver.status === DriverStatus.INACTIVE && !driver.userId;
@@ -202,6 +243,7 @@ export class DriversService {
     }
 
     const { token, hash } = this.tokens.generate();
+    const expiresAt = new Date(Date.now() + this.invitationTtlMs());
     await this.prisma.$transaction(async (tx) => {
       if (reopening) {
         await tx.driver.update({
@@ -219,23 +261,13 @@ export class DriversService {
           driverId: driver.id,
           email: driver.email,
           tokenHash: hash,
-          expiresAt: new Date(Date.now() + this.invitationTtlMs()),
+          expiresAt,
           invitedById: actor.sub,
         },
       });
     }, TRANSACTION_OPTIONS);
 
-    await this.audit.log({
-      actorId: actor.sub,
-      schoolId,
-      action: AuditAction.DriverInvitationResent,
-      targetType: 'Driver',
-      targetId: driver.id,
-      metadata: { driverId: driver.driverId, email: driver.email },
-    });
-
-    await this.sendInvite(driver, schoolId, token);
-    return this.findOne(actor, driver.id);
+    return { driver, schoolId, token, expiresAt };
   }
 
   private async sendInvite(driver: Driver, schoolId: string, token: string) {
