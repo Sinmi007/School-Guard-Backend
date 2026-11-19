@@ -21,6 +21,7 @@ import { AdministratorsModule } from './modules/administrators/administrators.mo
 import { StudentsModule } from './modules/students/students.module';
 import { DriversModule } from './modules/drivers/drivers.module';
 import { TransportModule } from './modules/transport/transport.module';
+import { ParentsModule } from './modules/parents/parents.module';
 
 @Module({
   imports: [
@@ -50,6 +51,7 @@ import { TransportModule } from './modules/transport/transport.module';
     StudentsModule,
     DriversModule,
     TransportModule,
+    ParentsModule,
   ],
   controllers: [AppController],
   providers: [

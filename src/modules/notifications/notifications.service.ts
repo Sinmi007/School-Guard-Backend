@@ -1,6 +1,11 @@
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { AccountStatus, NotificationType } from '@prisma/client';
+import {
+  AccountStatus,
+  MembershipStatus,
+  NotificationType,
+  UserRole,
+} from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { EmailService } from './email.service';
 
@@ -169,6 +174,109 @@ export class NotificationsService {
       'Driver account set up',
       `${driverName} accepted their invitation and can now use the Driver Portal.`,
     );
+  }
+
+  // ---------------------------------------------------------------------------
+  // Parents (M6)
+  // ---------------------------------------------------------------------------
+
+  /** Public registration link for a school (frontend route /register/parent). */
+  parentRegistrationUrl(publicToken: string): string {
+    return `${this.appBaseUrl}/register/parent?school=${encodeURIComponent(publicToken)}`;
+  }
+
+  async sendParentInvite(
+    email: string,
+    school: SchoolRef,
+    url: string,
+  ): Promise<void> {
+    await this.email.sendMail({
+      to: email,
+      subject: `Join ${school.name} on Àjò`,
+      html: `<p>Hello,</p><p><strong>${school.name}</strong> uses Àjò to keep parents updated about school transport.</p><p><a href="${url}">Create your parent account</a>, then add your child using their student ID and date of birth. The school will review your request.</p>`,
+    });
+  }
+
+  /** In-app alert to the school's admins that a link request is waiting. */
+  async notifySchoolOfParentRequest(
+    school: SchoolRef,
+    parentName: string,
+    studentCode: string,
+  ): Promise<void> {
+    const admins = await this.prisma.schoolMembership.findMany({
+      where: {
+        schoolId: school.id,
+        status: MembershipStatus.ACTIVE,
+        role: { in: [UserRole.MAIN_ADMIN, UserRole.MANAGER] },
+      },
+      select: { userId: true },
+    });
+    for (const a of admins) {
+      await this.createInApp(
+        a.userId,
+        school.id,
+        NotificationType.PARENT_LINK_REQUESTED,
+        'Parent link request',
+        `${parentName} asked to be linked to student ${studentCode}.`,
+      );
+    }
+  }
+
+  async notifyParentAccountDecision(
+    parent: { id: string; email: string; firstName: string },
+    school: SchoolRef,
+    approved: boolean,
+    reason?: string | null,
+  ): Promise<void> {
+    const title = approved
+      ? 'Your parent account is approved'
+      : 'Your parent account was not approved';
+    const body = approved
+      ? `${school.name} approved your Àjò parent account.`
+      : `${school.name} did not approve your parent account.${reason ? ` Reason: ${reason}` : ''}`;
+    await this.createInApp(
+      parent.id,
+      school.id,
+      approved
+        ? NotificationType.PARENT_APPROVED
+        : NotificationType.PARENT_REJECTED,
+      title,
+      body,
+    );
+    await this.email.sendMail({
+      to: parent.email,
+      subject: title,
+      html: `<p>Hi ${parent.firstName},</p><p>${body}</p><p><a href="${this.appBaseUrl}/login">Sign in to Àjò</a></p>`,
+    });
+  }
+
+  async notifyParentLinkDecision(
+    parent: { id: string; email: string; firstName: string },
+    school: SchoolRef,
+    studentFirstName: string,
+    approved: boolean,
+    reason?: string | null,
+  ): Promise<void> {
+    const title = approved
+      ? `You're now linked to ${studentFirstName}`
+      : `Your request to link to a student was not approved`;
+    const body = approved
+      ? `${school.name} confirmed you as ${studentFirstName}'s parent/guardian. You can now see their bus and pickup details.`
+      : `${school.name} could not confirm your link request.${reason ? ` Reason: ${reason}` : ''}`;
+    await this.createInApp(
+      parent.id,
+      school.id,
+      approved
+        ? NotificationType.PARENT_LINK_APPROVED
+        : NotificationType.PARENT_LINK_REJECTED,
+      title,
+      body,
+    );
+    await this.email.sendMail({
+      to: parent.email,
+      subject: title,
+      html: `<p>Hi ${parent.firstName},</p><p>${body}</p><p><a href="${this.appBaseUrl}/login">Sign in to Àjò</a></p>`,
+    });
   }
 
   async notifyMainAdminTransferred(

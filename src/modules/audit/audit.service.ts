@@ -50,6 +50,17 @@ export const AuditAction = {
   StudentTransportRemoved: 'student_transport_removed',
   /** Driver taken off their bus automatically when deactivated. */
   DriverRemovedFromBus: 'driver_removed_from_bus',
+  // M6: Parents
+  ParentInvited: 'parent_invited',
+  ParentInviteLinkRotated: 'parent_invite_link_rotated',
+  ParentRegistered: 'parent_registered',
+  ParentApproved: 'parent_approved',
+  ParentRejected: 'parent_rejected',
+  ParentSuspended: 'parent_suspended',
+  ParentLinkRequested: 'parent_link_requested',
+  StudentRelationshipApproved: 'student_relationship_approved',
+  StudentRelationshipRejected: 'student_relationship_rejected',
+  StudentRelationshipRemoved: 'student_relationship_removed',
 } as const;
 
 @Injectable()

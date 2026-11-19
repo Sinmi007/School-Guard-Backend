@@ -12,6 +12,8 @@ import {
   InvitationStatus,
   MembershipStatus,
   OnboardingStatus,
+  ParentAccountStatus,
+  ParentLinkStatus,
   Prisma,
   RouteStatus,
   StudentStatus,
@@ -99,6 +101,8 @@ export class SchoolsService {
       busesByStatus,
       routesByStatus,
       studentsOnRoutes,
+      parentsByStatus,
+      pendingParentRequests,
     ] = await Promise.all([
       this.prisma.student.count({ where: { schoolId } }),
       this.prisma.student.count({
@@ -153,6 +157,14 @@ export class SchoolsService {
       this.prisma.studentTransportAssignment.count({
         where: { schoolId, routeId: { not: null } },
       }),
+      this.prisma.parentAccount.groupBy({
+        by: ['status'],
+        where: { schoolId },
+        _count: { _all: true },
+      }),
+      this.prisma.parentStudent.count({
+        where: { schoolId, status: ParentLinkStatus.PENDING },
+      }),
     ]);
     const countOf = <T extends string>(
       rows: { status: T; _count: { _all: number } }[],
@@ -190,6 +202,12 @@ export class SchoolsService {
         total: sum(routesByStatus),
         active: countOf(routesByStatus, RouteStatus.ACTIVE),
         studentsAssigned: studentsOnRoutes,
+      },
+      parents: {
+        total: sum(parentsByStatus),
+        approved: countOf(parentsByStatus, ParentAccountStatus.APPROVED),
+        pending: countOf(parentsByStatus, ParentAccountStatus.PENDING),
+        pendingRequests: pendingParentRequests,
       },
     };
   }

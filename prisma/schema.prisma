@@ -61,6 +61,36 @@ enum NotificationType {
   MANAGER_ACCEPTED
   MAIN_ADMIN_TRANSFERRED
   DRIVER_ACCEPTED
+  PARENT_LINK_REQUESTED
+  PARENT_APPROVED
+  PARENT_REJECTED
+  PARENT_LINK_APPROVED
+  PARENT_LINK_REJECTED
+}
+
+/// PRD §5. A parent's standing with a school, separate from their links.
+enum ParentAccountStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  SUSPENDED
+}
+
+/// PRD §5. Each parent↔student link is reviewed independently.
+enum ParentLinkStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  REMOVED
+}
+
+enum ParentRelationship {
+  MOTHER
+  FATHER
+  GUARDIAN
+  GRANDPARENT
+  SIBLING
+  OTHER
 }
 
 /// Driver lifecycle (PRD M4). INVITED until the driver accepts their
@@ -153,6 +183,7 @@ model User {
   driverProfile            Driver?            @relation("DriverUser")
   driversCreated           Driver[]           @relation("DriverCreator")
   driverInvitationsMade    DriverInvitation[] @relation("DriverInviter")
+  parentAccounts           ParentAccount[]
 
   @@map("users")
 }
@@ -212,6 +243,8 @@ model School {
   studentTransportAssignments StudentTransportAssignment[]
   drivers                     Driver[]
   routes                      Route[]
+  parentAccounts              ParentAccount[]
+  parentLinks                 ParentStudent[]
   driverInvitations           DriverInvitation[]
 
   @@index([approvalStatus])
@@ -333,6 +366,65 @@ model DriverInvitation {
   @@index([driverId, status])
   @@index([schoolId, status])
   @@map("driver_invitations")
+}
+
+// ---------------------------------------------------------------------------
+// Parents (PRD M6)
+// ---------------------------------------------------------------------------
+
+/// A parent registered with a school through its public invite link. The
+/// login lives on User + a PARENT SchoolMembership; this holds the review state.
+model ParentAccount {
+  id       String @id @default(uuid())
+  schoolId String @map("school_id")
+  school   School @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  userId   String @map("user_id")
+  user     User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  status          ParentAccountStatus @default(PENDING)
+  rejectionReason String?             @map("rejection_reason")
+  reviewedAt      DateTime?           @map("reviewed_at")
+  reviewedById    String?             @map("reviewed_by_id")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  links ParentStudent[]
+
+  @@unique([schoolId, userId])
+  @@index([schoolId, status])
+  @@map("parent_accounts")
+}
+
+/// A parent's request to be linked to a student, and its review outcome.
+/// Parents can only ever see students whose link is APPROVED.
+model ParentStudent {
+  id        String        @id @default(uuid())
+  schoolId  String        @map("school_id")
+  school    School        @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  parentId  String        @map("parent_id")
+  parent    ParentAccount @relation(fields: [parentId], references: [id], onDelete: Cascade)
+  studentId String        @map("student_id")
+  student   Student       @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  relationship ParentRelationship
+  status       ParentLinkStatus   @default(PENDING)
+  // The parent's phone matches the guardian phone on the student record —
+  // a hint for the reviewer, never an automatic approval.
+  phoneMatchesGuardian Boolean @default(false) @map("phone_matches_guardian")
+  note                 String?
+
+  rejectionReason String?   @map("rejection_reason")
+  reviewedAt      DateTime? @map("reviewed_at")
+  reviewedById    String?   @map("reviewed_by_id")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@unique([parentId, studentId])
+  @@index([schoolId, status])
+  @@index([studentId])
+  @@map("parent_students")
 }
 
 // ---------------------------------------------------------------------------
@@ -498,6 +590,7 @@ model Student {
   transportAssignment StudentTransportAssignment?
 
   manifestEvents ManifestEvent[]
+  parentLinks    ParentStudent[]
 
   createdAt     DateTime      @default(now()) @map("created_at")
   updatedAt     DateTime      @updatedAt @map("updated_at")

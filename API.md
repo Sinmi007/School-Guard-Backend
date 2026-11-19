@@ -25,7 +25,8 @@ operational features unlock.
 11. [Students](#students)
 12. [Drivers](#drivers)
 13. [Buses & Routes](#buses--routes)
-14. [Error Codes](#error-codes)
+14. [Parents](#parents)
+15. [Error Codes](#error-codes)
 
 ---
 
@@ -199,7 +200,8 @@ Roles: `MAIN_ADMIN`, `MANAGER`. Dashboard counts, available at any status
   "administrators": { "managers": 0, "pendingInvitations": 0, "maxManagers": 5 },
   "drivers": { "total": 0, "active": 0, "invited": 0, "licenseWarnings": 0 },
   "buses": { "total": 0, "active": 0, "maintenance": 0 },
-  "routes": { "total": 0, "active": 0, "studentsAssigned": 0 }
+  "routes": { "total": 0, "active": 0, "studentsAssigned": 0 },
+  "parents": { "total": 0, "approved": 0, "pending": 0, "pendingRequests": 0 }
 }
 ```
 
@@ -374,7 +376,10 @@ Logged events include: `school_registered`, `onboarding_completed`,
 `bus_created`, `bus_updated`, `bus_driver_changed`, `route_created`, `route_updated`,
 `route_stops_updated`, `students_assigned_to_route`, `student_unassigned_from_route`,
 `student_transport_removed` (student no longer active) and `driver_removed_from_bus`
-(driver deactivated).
+(driver deactivated), `parent_invited`, `parent_invite_link_rotated`,
+`parent_registered`, `parent_approved`, `parent_rejected`, `parent_suspended`,
+`parent_link_requested`, `student_relationship_approved`,
+`student_relationship_rejected`, `student_relationship_removed`.
 
 ---
 
@@ -630,6 +635,71 @@ changes their stop.
 Student responses (`GET /students`, `GET /students/:id`) include
 `transportAssignment` with `route { id, name }`, `pickupStop { id, name,
 pickupTime }` and `bus { id, code, plateNumber }`.
+
+---
+
+## Parents
+
+Milestone 6. Parents register through their school's **public link**, then ask
+to be linked to their children. The school reviews every request.
+
+**Access rule:** a parent only ever receives details of students whose link is
+`APPROVED`; this is enforced in the queries themselves. Parents can't browse or
+search the roster.
+
+**Statuses** — account: `PENDING` → `APPROVED` / `REJECTED`, `SUSPENDED`
+(locked out). Link: `PENDING` → `APPROVED` / `REJECTED`, or `REMOVED` (unlinked).
+Approving a link also approves a pending account. Rejecting an account rejects
+its open requests.
+
+### Registration (public)
+
+`GET /parent-registration/:token` → `{ schoolName }`. `token` is the school's
+opaque `publicToken` (never an internal id). `404` if unknown, or the school is
+not approved/active.
+
+`POST /parent-registration` — `{ schoolToken, firstName, lastName, email, phone,
+password, confirmPassword }`. Creates the user, a `PARENT` membership in the
+token's school and a `PENDING` parent account; returns `{ accessToken, user,
+schoolName, redirectTo: "/parent" }`. `409` if the email already has an account.
+Throttled to 5/min.
+
+### Parent portal (role `PARENT`)
+
+`GET /parent-portal/me` → `{ id, status, rejectionReason, firstName, lastName,
+email, phone, schoolName, links: [{ id, status, relationship, rejectionReason,
+createdAt, reviewedAt, studentCode, student }] }`. `student` is null unless the
+link is `APPROVED`; then it has `studentId, firstName, lastName, classGrade,
+status, transport { pickupStop { name, landmark, pickupTime, dropoffTime },
+route { name, morningDeparture, afternoonDeparture }, bus { code, plateNumber,
+color, make, vehicleModel, status, driver { firstName, lastName, phone } } }`.
+
+`POST /parent-portal/link-requests` — `{ studentId: "AJO-000123", dateOfBirth:
+"2015-04-15", relationship, note? }`. Both the student ID **and** date of birth
+must match a student in the parent's own school; every miss returns the same
+`404` so the roster can't be probed. `409` if already pending/linked; `403` if the
+account was rejected; max 10 open requests; throttled to 10/min. A previously
+rejected/removed link re-opens as `PENDING`. Records whether the parent's phone
+matches the student's guardian phone (`phoneMatchesGuardian`, a reviewer hint).
+
+### School side (`MAIN_ADMIN`, `MANAGER`; approved school)
+
+- `GET /parents/invite-link` → `{ url, schoolName }` (`{APP_BASE_URL}/register/parent?school=<publicToken>`).
+- `POST /parents/invite-link/rotate` — Main Admin only; new token, old links stop working.
+- `POST /parents/invite-link/email` — `{ emails: [...] }` (1–50); emails the link. Throttled 5/min.
+- `GET /parents/requests?status=` — link requests (default `PENDING`), each with
+  `parent` (name, email, phone, account status) and `student` (incl. the school's
+  `dateOfBirth`, `guardianName`, `guardianPhone` for comparison).
+- `POST /parents/requests/:id/approve` · `POST /parents/requests/:id/reject` (`{ reason }` required).
+- `POST /parents/links/:id/remove` — unlink (parent loses access to that child).
+- `GET /parents?status=&search=` — parent accounts with their links.
+- `GET /parents/summary` → `{ total, approved, pending, pendingRequests }`.
+- `PATCH /parents/:id/status` — `{ status: APPROVED | REJECTED | SUSPENDED, reason? }`
+  (reason required for `REJECTED`). Suspension locks the parent out immediately.
+
+Parents are emailed (and notified in-app) when their account or a link is
+approved/rejected; school admins get an in-app notification for each new request.
+`GET /students/:id` includes `parents` (confirmed parents/guardians).
 
 ---
 

@@ -140,10 +140,40 @@ export class StudentsService {
     const schoolId = this.requireSchool(user);
     const student = await this.prisma.student.findFirst({
       where: { id, schoolId },
-      include: TRANSPORT_INCLUDE,
+      include: {
+        ...TRANSPORT_INCLUDE,
+        // Confirmed parents/guardians (M6).
+        parentLinks: {
+          where: { status: 'APPROVED' },
+          select: {
+            id: true,
+            relationship: true,
+            parent: {
+              select: {
+                user: {
+                  select: {
+                    firstName: true,
+                    lastName: true,
+                    email: true,
+                    phone: true,
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
     });
     if (!student) throw new NotFoundException('Student not found');
-    return student;
+    const { parentLinks, ...rest } = student;
+    return {
+      ...rest,
+      parents: parentLinks.map((l) => ({
+        linkId: l.id,
+        relationship: l.relationship,
+        ...l.parent.user,
+      })),
+    };
   }
 
   /** Roster counts for dashboard tiles. */
