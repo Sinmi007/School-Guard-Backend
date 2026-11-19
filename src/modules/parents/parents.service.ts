@@ -23,6 +23,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { AuditAction, AuditService } from '../audit/audit.service';
 import { parseDateOnly } from '../drivers/dto/date-only.validator';
 import { NotificationsService } from '../notifications/notifications.service';
+import { TripsService } from '../trips/trips.service';
 import {
   LinkRequestDto,
   ListParentsQueryDto,
@@ -66,6 +67,7 @@ export class ParentsService {
     private readonly token: TokenService,
     private readonly audit: AuditService,
     private readonly notifications: NotificationsService,
+    private readonly trips: TripsService,
   ) {}
 
   private requireSchool(user: AuthTokenPayload): string {
@@ -662,6 +664,8 @@ export class ParentsService {
                       landmark: true,
                       pickupTime: true,
                       dropoffTime: true,
+                      latitude: true,
+                      longitude: true,
                     },
                   },
                   route: {
@@ -696,6 +700,9 @@ export class ParentsService {
       }),
     ]);
     const detail = new Map(approved.map((a) => [a.id, a.student]));
+    const todayTrips = await this.trips.todayForStudents(
+      approved.map((a) => a.student.id),
+    );
     const { user, school, ...acc } = account;
     return {
       ...acc,
@@ -705,12 +712,15 @@ export class ParentsService {
         const full = detail.get(l.id);
         if (!full)
           return { ...l, studentCode: student.studentId, student: null };
-        const { id: _id, transportAssignment, ...s } = full;
-        void _id;
+        const { id, transportAssignment, ...s } = full;
         return {
           ...l,
           studentCode: student.studentId,
-          student: { ...s, transport: transportAssignment },
+          student: {
+            ...s,
+            transport: transportAssignment,
+            todayTrips: todayTrips.get(id) ?? [],
+          },
         };
       }),
     };

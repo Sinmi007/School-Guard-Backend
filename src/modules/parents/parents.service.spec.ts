@@ -21,6 +21,7 @@ import type { HashingService } from '../../common/hashing/hashing.service';
 import type { PrismaService } from '../../prisma/prisma.service';
 import type { AuditService } from '../audit/audit.service';
 import type { NotificationsService } from '../notifications/notifications.service';
+import type { TripsService } from '../trips/trips.service';
 import { ParentsService, samePhone } from './parents.service';
 
 const admin: AuthTokenPayload = {
@@ -95,6 +96,9 @@ function build() {
     { sign: jest.fn().mockResolvedValue('jwt') } as unknown as TokenService,
     { log: jest.fn() } as unknown as AuditService,
     notifications as unknown as NotificationsService,
+    {
+      todayForStudents: jest.fn().mockResolvedValue(new Map()),
+    } as unknown as TripsService,
   );
   return { service, prisma, tx, notifications };
 }

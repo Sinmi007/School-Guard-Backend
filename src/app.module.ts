@@ -22,6 +22,7 @@ import { StudentsModule } from './modules/students/students.module';
 import { DriversModule } from './modules/drivers/drivers.module';
 import { TransportModule } from './modules/transport/transport.module';
 import { ParentsModule } from './modules/parents/parents.module';
+import { TripsModule } from './modules/trips/trips.module';
 
 @Module({
   imports: [
@@ -52,6 +53,7 @@ import { ParentsModule } from './modules/parents/parents.module';
     DriversModule,
     TransportModule,
     ParentsModule,
+    TripsModule,
   ],
   controllers: [AppController],
   providers: [

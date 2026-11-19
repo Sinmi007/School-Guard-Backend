@@ -26,7 +26,8 @@ operational features unlock.
 12. [Drivers](#drivers)
 13. [Buses & Routes](#buses--routes)
 14. [Parents](#parents)
-15. [Error Codes](#error-codes)
+15. [Trips](#trips)
+16. [Error Codes](#error-codes)
 
 ---
 
@@ -201,7 +202,8 @@ Roles: `MAIN_ADMIN`, `MANAGER`. Dashboard counts, available at any status
   "drivers": { "total": 0, "active": 0, "invited": 0, "licenseWarnings": 0 },
   "buses": { "total": 0, "active": 0, "maintenance": 0 },
   "routes": { "total": 0, "active": 0, "studentsAssigned": 0 },
-  "parents": { "total": 0, "approved": 0, "pending": 0, "pendingRequests": 0 }
+  "parents": { "total": 0, "approved": 0, "pending": 0, "pendingRequests": 0 },
+  "tripsToday": { "inProgress": 0, "completed": 0 }
 }
 ```
 
@@ -379,7 +381,8 @@ Logged events include: `school_registered`, `onboarding_completed`,
 (driver deactivated), `parent_invited`, `parent_invite_link_rotated`,
 `parent_registered`, `parent_approved`, `parent_rejected`, `parent_suspended`,
 `parent_link_requested`, `student_relationship_approved`,
-`student_relationship_rejected`, `student_relationship_removed`.
+`student_relationship_rejected`, `student_relationship_removed`, `trip_started`,
+`trip_ended` (metadata `stillOnBoard` when force-ended), `trip_cancelled`.
 
 ---
 
@@ -672,7 +675,9 @@ createdAt, reviewedAt, studentCode, student }] }`. `student` is null unless the
 link is `APPROVED`; then it has `studentId, firstName, lastName, classGrade,
 status, transport { pickupStop { name, landmark, pickupTime, dropoffTime },
 route { name, morningDeparture, afternoonDeparture }, bus { code, plateNumber,
-color, make, vehicleModel, status, driver { firstName, lastName, phone } } }`.
+color, make, vehicleModel, status, driver { firstName, lastName, phone } } }`
+(`pickupStop` also has `latitude`/`longitude`) and `todayTrips: [{ direction,
+tripStatus, startedAt, endedAt, status, boardedAt, droppedOffAt, stop }]`.
 
 `POST /parent-portal/link-requests` — `{ studentId: "AJO-000123", dateOfBirth:
 "2015-04-15", relationship, note? }`. Both the student ID **and** date of birth
@@ -700,6 +705,57 @@ matches the student's guardian phone (`phoneMatchesGuardian`, a reviewer hint).
 Parents are emailed (and notified in-app) when their account or a link is
 approved/rejected; school admins get an in-app notification for each new request.
 `GET /students/:id` includes `parents` (confirmed parents/guardians).
+
+---
+
+## Trips
+
+Milestone 7. A trip is one run of a route (`MORNING` = home → school,
+`AFTERNOON` = school → home) on a school day. The school day is computed in
+`SCHOOL_TIMEZONE` (default `Africa/Lagos`).
+
+**Rules**
+
+- A route runs at most once per day in each direction (cancelled runs excepted);
+  a driver has at most one trip in progress. Both are enforced by database
+  indexes and surface as `409`.
+- Starting a trip snapshots the route's `ACTIVE` students (at their pickup stops)
+  into the trip's manifest.
+- Student states: `PENDING` → `BOARDED` | `ABSENT`; `BOARDED` → `DROPPED_OFF`.
+  Each step can be undone one step back while the trip is running.
+- Ending a **morning** trip marks everyone still on board as dropped off (arrived
+  at school). Ending an **afternoon** trip while a child is still `BOARDED` returns
+  `409` (`{ message, onBoard: [studentIds] }`) unless `force: true`; the count is
+  kept as `endedWithOnBoard` and flagged to the school and parents.
+
+### Driver (role `DRIVER`)
+
+- `GET /driver-portal/trips/today` → `{ serviceDate, bus, activeTripId, routes: [{ id,
+  name, morningDeparture, afternoonDeparture, studentCount, runs: [{ direction,
+  trip: { id, status, startedAt, endedAt, counts } | null }] }] }` (active routes on
+  the driver's bus).
+- `POST /driver-portal/trips` — `{ routeId, direction }` → trip detail. Route must be
+  served by the driver's bus; driver must be `ACTIVE`.
+- `GET /driver-portal/trips/:id` → trip detail (own trips only).
+- `POST /driver-portal/trips/:id/students/:studentId` — `{ status }` → trip detail.
+- `POST /driver-portal/trips/:id/end` — `{ force? }` → trip detail.
+
+**Trip detail:** `{ id, direction, status, serviceDate, startedAt, endedAt,
+cancelledReason, endedWithOnBoard, route, bus, driver, counts: { total, PENDING,
+BOARDED, DROPPED_OFF, ABSENT }, students: [{ studentId, code, firstName, lastName,
+classGrade, stop, status, boardedAt, droppedOffAt }] }` (students ordered by stop).
+
+### School (`MAIN_ADMIN`, `MANAGER`; approved school)
+
+- `GET /trips?date=YYYY-MM-DD` (default today) → `{ serviceDate, trips: [...] }` with
+  route, bus, driver and `counts`.
+- `GET /trips/:id` → trip detail.
+- `POST /trips/:id/cancel` — `{ reason }`; only trips in progress.
+
+### Stop coordinates
+
+`PUT /routes/:id/stops` accepts `latitude`/`longitude` per stop (set by clicking an
+OpenStreetMap map in the route editor); they're returned on stops everywhere.
 
 ---
 

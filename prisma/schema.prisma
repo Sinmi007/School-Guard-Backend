@@ -84,6 +84,26 @@ enum ParentLinkStatus {
   REMOVED
 }
 
+/// PRD M7. MORNING = home → school, AFTERNOON = school → home.
+enum TripDirection {
+  MORNING
+  AFTERNOON
+}
+
+enum TripStatus {
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+/// A student's state on one trip. PENDING = not yet on the bus.
+enum TripStudentStatus {
+  PENDING
+  BOARDED
+  DROPPED_OFF
+  ABSENT
+}
+
 enum ParentRelationship {
   MOTHER
   FATHER
@@ -245,6 +265,7 @@ model School {
   routes                      Route[]
   parentAccounts              ParentAccount[]
   parentLinks                 ParentStudent[]
+  trips                       Trip[]
   driverInvitations           DriverInvitation[]
 
   @@index([approvalStatus])
@@ -337,6 +358,7 @@ model Driver {
   invitations DriverInvitation[]
   // The bus this driver is assigned to (M5); at most one.
   bus         Bus?
+  trips       Trip[]
 
   @@unique([schoolId, driverId])
   @@unique([schoolId, email])
@@ -428,6 +450,63 @@ model ParentStudent {
 }
 
 // ---------------------------------------------------------------------------
+// Trips (PRD M7)
+// ---------------------------------------------------------------------------
+
+/// One run of a route by its bus and driver on a given school day.
+model Trip {
+  id        String        @id @default(uuid())
+  schoolId  String        @map("school_id")
+  school    School        @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  routeId   String        @map("route_id")
+  route     Route         @relation(fields: [routeId], references: [id], onDelete: Cascade)
+  busId     String?       @map("bus_id")
+  bus       Bus?          @relation(fields: [busId], references: [id], onDelete: SetNull)
+  driverId  String?       @map("driver_id")
+  driver    Driver?       @relation(fields: [driverId], references: [id], onDelete: SetNull)
+  direction TripDirection
+  status    TripStatus    @default(IN_PROGRESS)
+  // School-local calendar day the trip belongs to.
+  serviceDate DateTime @map("service_date") @db.Date
+
+  startedAt          DateTime  @default(now()) @map("started_at")
+  endedAt            DateTime? @map("ended_at")
+  cancelledReason    String?   @map("cancelled_reason")
+  // Students still marked on the bus when an afternoon trip was force-ended.
+  endedWithOnBoard   Int       @default(0) @map("ended_with_on_board")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  students TripStudent[]
+
+  @@index([schoolId, serviceDate])
+  @@index([routeId, serviceDate, direction])
+  @@index([driverId, status])
+  @@map("trips")
+}
+
+/// The trip's manifest: a snapshot of the route's students when it started.
+model TripStudent {
+  id           String            @id @default(uuid())
+  tripId       String            @map("trip_id")
+  trip         Trip              @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  studentId    String            @map("student_id")
+  student      Student           @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  stopId       String?           @map("stop_id")
+  stop         RouteStop?        @relation(fields: [stopId], references: [id], onDelete: SetNull)
+  status       TripStudentStatus @default(PENDING)
+  boardedAt    DateTime?         @map("boarded_at")
+  droppedOffAt DateTime?         @map("dropped_off_at")
+  markedAt     DateTime?         @map("marked_at")
+  markedById   String?           @map("marked_by_id")
+
+  @@unique([tripId, studentId])
+  @@index([studentId])
+  @@map("trip_students")
+}
+
+// ---------------------------------------------------------------------------
 // Cross-cutting: audit + notifications
 // ---------------------------------------------------------------------------
 
@@ -497,6 +576,7 @@ model Bus {
   updatedAt DateTime @updatedAt @map("updated_at")
 
   routes             Route[]
+  trips              Trip[]
   studentAssignments StudentTransportAssignment[]
   telemetry          TelemetryLog[]
   events             ManifestEvent[]
@@ -527,6 +607,7 @@ model Route {
   updatedAt DateTime    @updatedAt @map("updated_at")
 
   stops              RouteStop[]
+  trips              Trip[]
   studentAssignments StudentTransportAssignment[]
 
   @@unique([schoolId, name])
@@ -556,6 +637,7 @@ model RouteStop {
   updatedAt DateTime @updatedAt @map("updated_at")
 
   pickupAssignments StudentTransportAssignment[]
+  tripStudents      TripStudent[]
 
   @@index([routeId, sequence])
   @@index([schoolId])
@@ -591,6 +673,7 @@ model Student {
 
   manifestEvents ManifestEvent[]
   parentLinks    ParentStudent[]
+  tripStudents   TripStudent[]
 
   createdAt     DateTime      @default(now()) @map("created_at")
   updatedAt     DateTime      @updatedAt @map("updated_at")

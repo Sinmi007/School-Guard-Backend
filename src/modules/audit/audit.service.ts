@@ -61,6 +61,10 @@ export const AuditAction = {
   StudentRelationshipApproved: 'student_relationship_approved',
   StudentRelationshipRejected: 'student_relationship_rejected',
   StudentRelationshipRemoved: 'student_relationship_removed',
+  // M7: Trips
+  TripStarted: 'trip_started',
+  TripEnded: 'trip_ended',
+  TripCancelled: 'trip_cancelled',
 } as const;
 
 @Injectable()

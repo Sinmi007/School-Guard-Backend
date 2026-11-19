@@ -26,6 +26,7 @@ import { AuditAction, AuditService } from '../audit/audit.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { OnboardingDto } from './dto/onboarding.dto';
 import { withTransportFields } from './school-view';
+import { TripsService } from '../trips/trips.service';
 import { LICENSE_WARNING_DAYS } from '../drivers/drivers.service';
 
 export const MAX_MANAGERS = 5;
@@ -37,6 +38,7 @@ export class SchoolsService {
     private readonly authz: AuthorizationService,
     private readonly audit: AuditService,
     private readonly notifications: NotificationsService,
+    private readonly trips: TripsService,
   ) {}
 
   private requireSchool(user: AuthTokenPayload): string {
@@ -103,6 +105,7 @@ export class SchoolsService {
       studentsOnRoutes,
       parentsByStatus,
       pendingParentRequests,
+      tripsToday,
     ] = await Promise.all([
       this.prisma.student.count({ where: { schoolId } }),
       this.prisma.student.count({
@@ -165,6 +168,7 @@ export class SchoolsService {
       this.prisma.parentStudent.count({
         where: { schoolId, status: ParentLinkStatus.PENDING },
       }),
+      this.trips.summaryFor(schoolId),
     ]);
     const countOf = <T extends string>(
       rows: { status: T; _count: { _all: number } }[],
@@ -209,6 +213,7 @@ export class SchoolsService {
         pending: countOf(parentsByStatus, ParentAccountStatus.PENDING),
         pendingRequests: pendingParentRequests,
       },
+      tripsToday,
     };
   }
 
