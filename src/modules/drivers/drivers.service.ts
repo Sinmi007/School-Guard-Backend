@@ -773,6 +773,8 @@ export class DriversService {
             landmark: st.landmark,
             pickupTime: st.pickupTime,
             dropoffTime: st.dropoffTime,
+            latitude: st.latitude,
+            longitude: st.longitude,
             students: studentAssignments
               .filter((a) => a.pickupStopId === st.id)
               .map((a) => a.student)

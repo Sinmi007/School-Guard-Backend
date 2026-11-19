@@ -737,6 +737,10 @@ Milestone 7. A trip is one run of a route (`MORNING` = home → school,
   `409` (`{ message, onBoard: [studentIds] }`) unless `force: true`; the count is
   kept as `endedWithOnBoard` and flagged to the school and parents.
 
+**Trip detail** includes `route.stops`: every stop on the route in order
+(`{ id, name, sequence, landmark, pickupTime, dropoffTime, latitude, longitude }`),
+so the driver app can draw the route and pick the next stop.
+
 ### Driver (role `DRIVER`)
 
 - `GET /driver-portal/trips/today` → `{ serviceDate, bus, activeTripId, routes: [{ id,

@@ -51,6 +51,20 @@ const TRIP_DETAIL = {
       name: true,
       morningDeparture: true,
       afternoonDeparture: true,
+      // Every stop in order (with pins), so the driver app can show the route map.
+      stops: {
+        orderBy: { sequence: 'asc' },
+        select: {
+          id: true,
+          name: true,
+          sequence: true,
+          landmark: true,
+          pickupTime: true,
+          dropoffTime: true,
+          latitude: true,
+          longitude: true,
+        },
+      },
     },
   },
   bus: { select: { id: true, code: true, plateNumber: true } },
