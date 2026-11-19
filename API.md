@@ -27,7 +27,8 @@ operational features unlock.
 13. [Buses & Routes](#buses--routes)
 14. [Parents](#parents)
 15. [Trips](#trips)
-16. [Error Codes](#error-codes)
+16. [Live Tracking](#live-tracking)
+17. [Error Codes](#error-codes)
 
 ---
 
@@ -756,6 +757,52 @@ classGrade, stop, status, boardedAt, droppedOffAt }] }` (students ordered by sto
 
 `PUT /routes/:id/stops` accepts `latitude`/`longitude` per stop (set by clicking an
 OpenStreetMap map in the route editor); they're returned on stops everywhere.
+
+---
+
+## Live Tracking
+
+Milestone 8. While a trip is `IN_PROGRESS` the driver's phone sends GPS fixes;
+the school and the child's parents read the latest position by polling (every
+~15 s in the apps). No WebSockets: plain HTTP suits the hosting and sleeping
+instances.
+
+**Location object** (wherever a live position appears): `{ lat, lng, at,
+speedKmh, stale }`. `stale` = no fix for over 2 minutes.
+
+### Driver
+
+`POST /driver-portal/trips/:id/locations` — `{ points: [{ lat, lng, recordedAt,
+speedMps?, heading?, accuracyM? }] }` (1–200 points; the app sends every ~10 s
+and batches fixes queued while offline). Own running trip only. Points older
+than the trip (minus 5 min), in the future, or less accurate than 1 km are
+dropped. Returns `{ accepted, ended }`; after the trip ends, late batches are
+accepted as `{ accepted: 0, ended: true }` rather than erroring.
+
+### School (`MAIN_ADMIN`, `MANAGER`)
+
+- `GET /trips/live` → today's running trips: `{ id, direction, startedAt, route {
+  id, name, stops[] }, bus, driver, onBoard, total, location }`.
+- `GET /trips/:id/path` → `{ tripId, status, stops, location, points: [{ lat, lng,
+  at }] }` (thinned to at most 500 points).
+
+### Parent (role `PARENT`)
+
+`GET /parent-portal/live` → one entry per **approved** child on a trip that's
+running now **and** who is still waiting for the bus or riding it:
+`{ studentId, studentCode, firstName, tripId, direction, childStatus, bus,
+location, stop { name, latitude, longitude }, eta }`. Once the child is dropped
+off or marked absent, the parent no longer receives the bus position.
+
+`eta` (or null) — `{ minutes, distanceKm, arriving }` — is given only while the
+bus is heading to the child's stop (morning: not yet picked up; afternoon: on
+board), the fix isn't stale and the stop has coordinates. It's straight-line
+distance × 1.3 (roads) at the bus's current speed (10–60 km/h) or 20 km/h when
+slower; `arriving` within 300 m.
+
+### Retention
+
+GPS breadcrumbs are deleted after 30 days (checked whenever a trip starts).
 
 ---
 
