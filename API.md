@@ -352,11 +352,59 @@ Creates the Manager account and an `ACTIVE` membership, then marks the invitatio
 
 ### `GET /notifications`
 
-Lists the authenticated user's in-app notifications.
+The caller's notifications, newest first (any role).
+Query: `limit` (1–50, default 20), `before` (ISO date: the previous page's `nextBefore`).
 
-### `POST /notifications/:id/read`
+```json
+{
+  "items": [
+    { "id": "…", "type": "STUDENT_BOARDED", "title": "✅ Ada is on the bus",
+      "body": "Picked up at Sabo at 7:04 AM on AJO-03.", "link": "/parent",
+      "readAt": null, "createdAt": "2026-11-22T06:04:00.000Z" }
+  ],
+  "unreadCount": 3,
+  "nextBefore": null
+}
+```
 
-Marks one of the caller's notifications as read.
+### `GET /notifications/unread-count` → `{ count }`
+
+### `POST /notifications/:id/read` → the notification (read). `404` if it isn't yours.
+
+### `POST /notifications/read-all` → `{ updated }`
+
+### Web push
+
+Lock-screen alerts through the browser's push service (VAPID). Off until
+`VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` are set; in-app notifications work either way.
+
+- `GET /notifications/push/key` → `{ publicKey }` (`null` when push is off).
+- `POST /notifications/push/subscriptions` — the browser's `PushSubscription.toJSON()`:
+  `{ endpoint, keys: { p256dh, auth } }` → `{ subscribed: true }`. An endpoint belongs to
+  one user; subscribing again from another account moves it.
+- `POST /notifications/push/subscriptions/remove` — `{ endpoint }` → `{ subscribed: false }`.
+- `POST /notifications/push/test` → `{ sent }`: a test alert to the caller's devices.
+
+Push payload (for the service worker): `{ title, body, link, tag }`. Devices that the
+push service reports as gone (404/410) are removed.
+
+### What triggers a notification
+
+| Recipient | Event | Link |
+|---|---|---|
+| Parent (approved, own children only) | Trip started (one per parent, names their children) | `/parent` |
+| Parent | Child boarded / arrived at school / dropped off / marked absent | `/parent` |
+| Parent | Bus about 5 min from (or arriving at) the child's stop — pickup in the morning, drop-off in the afternoon; once per child per trip | `/parent` |
+| Parent + school admins | Afternoon trip ended with the child still marked on board | `/parent`, `/school/runs/:id` |
+| Driver | Put on a bus | `/driver` |
+| Super Admin | School registered / resubmitted | `/tower/schools` |
+| Main Admin | School approved / rejected | `/school/dashboard` |
+| School admins | Parent link request | `/school/parents` |
+| Inviting admin | Driver set up their account | `/school/drivers` |
+| Parent | Account / link approved or rejected | `/parent` |
+
+Trip alerts are deduplicated (undo + redo doesn't alert twice) and sent in the
+background, so they never slow down or block the driver.
 
 ---
 

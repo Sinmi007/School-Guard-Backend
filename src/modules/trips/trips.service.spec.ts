@@ -17,6 +17,7 @@ import {
 import type { AuthTokenPayload } from '../../common/auth/token.service';
 import type { PrismaService } from '../../prisma/prisma.service';
 import type { AuditService } from '../audit/audit.service';
+import { TripAlertsService } from './trip-alerts.service';
 import { TripsService, serviceDate } from './trips.service';
 
 const driverUser: AuthTokenPayload = {
@@ -84,14 +85,20 @@ function build() {
     trip: { findFirst: jest.fn(), findMany: jest.fn().mockResolvedValue([]) },
     tripStudent: { findFirst: jest.fn(), update: jest.fn() },
   };
+  const alerts = {
+    tripStarted: jest.fn().mockResolvedValue(undefined),
+    studentMarked: jest.fn().mockResolvedValue(undefined),
+    tripEnded: jest.fn().mockResolvedValue(undefined),
+  } as unknown as jest.Mocked<TripAlertsService>;
   const service = new TripsService(
     prisma as unknown as PrismaService,
     { log: jest.fn() } as unknown as AuditService,
     {
       get: jest.fn().mockReturnValue('Africa/Lagos'),
     } as unknown as ConfigService,
+    alerts,
   );
-  return { service, prisma, tx };
+  return { service, prisma, tx, alerts };
 }
 
 describe('serviceDate', () => {

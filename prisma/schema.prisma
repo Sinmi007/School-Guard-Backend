@@ -66,6 +66,14 @@ enum NotificationType {
   PARENT_REJECTED
   PARENT_LINK_APPROVED
   PARENT_LINK_REJECTED
+  // Trips & transport (M9)
+  TRIP_STARTED
+  STUDENT_BOARDED
+  STUDENT_DROPPED_OFF
+  STUDENT_ABSENT
+  BUS_APPROACHING
+  TRIP_ENDED_WITH_ONBOARD
+  BUS_ASSIGNED
 }
 
 /// PRD §5. A parent's standing with a school, separate from their links.
@@ -204,6 +212,7 @@ model User {
   driversCreated           Driver[]           @relation("DriverCreator")
   driverInvitationsMade    DriverInvitation[] @relation("DriverInviter")
   parentAccounts           ParentAccount[]
+  pushSubscriptions        PushSubscription[]
 
   @@map("users")
 }
@@ -562,11 +571,33 @@ model Notification {
   type      NotificationType
   title     String
   body      String
+  /// In-app page to open, e.g. /parent or /school/runs/<id>.
+  link      String?
+  /// Same key for the same user is stored once (e.g. one "bus is near" per child per trip).
+  dedupeKey String?          @map("dedupe_key")
   readAt    DateTime?        @map("read_at")
   createdAt DateTime         @default(now()) @map("created_at")
 
+  @@unique([userId, dedupeKey])
   @@index([userId, readAt])
+  @@index([userId, createdAt])
   @@map("notifications")
+}
+
+/// A browser/phone that agreed to receive web push for a user (M9).
+model PushSubscription {
+  id         String   @id @default(uuid())
+  userId     String   @map("user_id")
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  endpoint   String   @unique
+  p256dh     String
+  auth       String
+  userAgent  String?  @map("user_agent")
+  createdAt  DateTime @default(now()) @map("created_at")
+  lastUsedAt DateTime? @map("last_used_at")
+
+  @@index([userId])
+  @@map("push_subscriptions")
 }
 
 // ---------------------------------------------------------------------------

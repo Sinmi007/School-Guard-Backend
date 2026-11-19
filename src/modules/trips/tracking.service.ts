@@ -19,6 +19,7 @@ import {
   haversineKm,
   thin,
 } from './geo';
+import { TripAlertsService } from './trip-alerts.service';
 import { TripsService } from './trips.service';
 
 /** Breadcrumbs are kept this long (privacy: children's movements). */
@@ -40,6 +41,7 @@ export class TrackingService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly trips: TripsService,
+    private readonly alerts: TripAlertsService,
   ) {}
 
   private requireSchool(user: AuthTokenPayload): string {
@@ -129,6 +131,7 @@ export class TrackingService {
           ]
         : []),
     ]);
+    if (advances) void this.alerts.busMoved(tripId);
     return { accepted: good.length, ended: false };
   }
 

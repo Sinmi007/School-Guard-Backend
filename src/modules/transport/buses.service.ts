@@ -8,6 +8,7 @@ import {
 import { BusStatus, DriverStatus, Prisma } from '@prisma/client';
 import { AuthTokenPayload } from '../../common/auth/token.service';
 import { PrismaService } from '../../prisma/prisma.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import { AuditAction, AuditService } from '../audit/audit.service';
 import { CreateBusDto } from './dto/create-bus.dto';
 import { ListBusesQueryDto } from './dto/list-query.dto';
@@ -48,6 +49,7 @@ export class BusesService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
+    private readonly notifications: NotificationsService,
   ) {}
 
   private requireSchool(user: AuthTokenPayload): string {
@@ -136,6 +138,7 @@ export class BusesService {
         driverId: bus.driverId,
       },
     });
+    if (bus.driverId) await this.tellDriver(schoolId, bus.driverId, bus);
     return this.findOne(actor, bus.id);
   }
 
@@ -220,7 +223,32 @@ export class BusesService {
           }),
       },
     });
+    if (driverChanged && data.driverId) {
+      await this.tellDriver(schoolId, data.driverId as string, {
+        code: (data.code as string | undefined) ?? existing.code,
+        plateNumber:
+          (data.plateNumber as string | undefined) ?? existing.plateNumber,
+      });
+    }
     return this.findOne(actor, id);
+  }
+
+  /** In-app + push to a driver who has an account; best-effort. */
+  private async tellDriver(
+    schoolId: string,
+    driverId: string,
+    bus: { code: string; plateNumber: string },
+  ) {
+    try {
+      const d = await this.prisma.driver.findUnique({
+        where: { id: driverId },
+        select: { userId: true },
+      });
+      if (d?.userId)
+        await this.notifications.notifyBusAssigned(d.userId, schoolId, bus);
+    } catch {
+      // A notification problem must never undo a saved bus.
+    }
   }
 
   // ---------------------------------------------------------------------------

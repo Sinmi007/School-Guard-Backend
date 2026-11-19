@@ -8,6 +8,7 @@ import {
 import type { AuthTokenPayload } from '../../common/auth/token.service';
 import type { PrismaService } from '../../prisma/prisma.service';
 import { etaMinutes, haversineKm, thin } from './geo';
+import { TripAlertsService } from './trip-alerts.service';
 import { TrackingService } from './tracking.service';
 import type { TripsService } from './trips.service';
 
@@ -66,9 +67,17 @@ function build() {
   const trips = {
     today: () => new Date('2026-11-21T00:00:00Z'),
   } as unknown as TripsService;
+  const alerts = {
+    busMoved: jest.fn().mockResolvedValue(undefined),
+  } as unknown as TripAlertsService;
   return {
     prisma,
-    service: new TrackingService(prisma as unknown as PrismaService, trips),
+    alerts,
+    service: new TrackingService(
+      prisma as unknown as PrismaService,
+      trips,
+      alerts,
+    ),
   };
 }
 

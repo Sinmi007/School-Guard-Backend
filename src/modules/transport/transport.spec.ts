@@ -9,6 +9,7 @@ import {
 } from '@prisma/client';
 import type { AuthTokenPayload } from '../../common/auth/token.service';
 import { PrismaService } from '../../prisma/prisma.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import { AuditService } from '../audit/audit.service';
 import { BusesService } from './buses.service';
 import { RoutesService } from './routes.service';
@@ -48,7 +49,9 @@ function mocks() {
   return {
     tx,
     prisma,
-    buses: new BusesService(prisma as unknown as PrismaService, audit),
+    buses: new BusesService(prisma as unknown as PrismaService, audit, {
+      notifyBusAssigned: jest.fn(),
+    } as unknown as NotificationsService),
     routes: new RoutesService(prisma as unknown as PrismaService, audit),
   };
 }

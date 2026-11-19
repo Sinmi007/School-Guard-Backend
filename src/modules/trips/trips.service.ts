@@ -18,6 +18,7 @@ import {
 } from '@prisma/client';
 import { AuthTokenPayload } from '../../common/auth/token.service';
 import { PrismaService } from '../../prisma/prisma.service';
+import { TripAlertsService } from './trip-alerts.service';
 import { AuditAction, AuditService } from '../audit/audit.service';
 
 const TRANSACTION_OPTIONS = { maxWait: 10_000, timeout: 20_000 } as const;
@@ -110,6 +111,7 @@ export class TripsService {
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
     private readonly config: ConfigService,
+    private readonly alerts: TripAlertsService,
   ) {}
 
   /** The school's calendar day right now. */
@@ -285,6 +287,8 @@ export class TripsService {
         driverId: driver.driverId,
       },
     });
+    // Parents hear the bus has set off (in the background; never blocks the driver).
+    void this.alerts.tripStarted(trip.id);
     return this.driverTrip(actor, trip.id);
   }
 
@@ -333,6 +337,8 @@ export class TripsService {
         markedById: actor.sub,
       },
     });
+    if (entry.status !== to)
+      void this.alerts.studentMarked(tripId, studentId, to);
     return this.driverTrip(actor, tripId);
   }
 
@@ -403,6 +409,12 @@ export class TripsService {
           }),
       },
     });
+    const onBoardIds = onBoard.map((s) => s.student.id);
+    void this.alerts.tripEnded(
+      tripId,
+      afternoon ? [] : onBoardIds,
+      afternoon ? onBoardIds : [],
+    );
     return this.driverTrip(actor, tripId);
   }
 
